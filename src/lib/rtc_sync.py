@@ -26,20 +26,10 @@ import time
 logger = logging.getLogger(__name__)
 
 _RTC_RE = re.compile(r'#rtctime:\s*(\d+)')
-_LOG_PATH = '/mnt/upan/rtc_sync.log'
 
 # Sanity window: only accept times between 2000-01-01 and 2100-01-01.
 _MIN_EPOCH = 946684800
 _MAX_EPOCH = 4102444800
-
-
-def _log(msg):
-    """Best-effort diagnostic log on the PC-Mode-visible partition."""
-    try:
-        with open(_LOG_PATH, 'a') as f:
-            f.write(msg + '\n')
-    except Exception:
-        pass
 
 
 def _read_rtc(timeout=1.5):
@@ -116,16 +106,16 @@ def set_rtc(epoch):
         import hmi_driver
         ser = getattr(hmi_driver, '_ser', None)
         if ser is None or not getattr(ser, 'is_open', False):
-            _log('set_rtc: no serial')
+            logger.warning('rtc_sync: set_rtc: no serial')
             return False
         frame = (b'giveyoutime' + b'T'
                  + struct.pack('>I', int(epoch) & 0xFFFFFFFF) + b'A' + b'\r\n')
         ser.write(frame)
         ser.flush()
-        _log('set_rtc: ok %d' % int(epoch))
+        logger.debug('rtc_sync: set_rtc: ok %d', int(epoch))
         return True
     except Exception as e:
-        _log('set_rtc: failed: %s' % e)
+        logger.warning('rtc_sync: set_rtc failed: %s', e)
         return False
 
 
@@ -134,14 +124,14 @@ def sync_now(timeout=1.5):
     raw = _read_rtc(timeout)
     secs = _to_epoch(raw)
     if secs is None:
-        _log('boot rtc_sync: no usable RTC (raw=%r)' % (raw,))
+        logger.warning('rtc_sync: no usable RTC (raw=%r)', raw)
         return None
     try:
         os.system('date -s "@%d"' % secs)
-        _log('boot rtc_sync: ok raw=%r -> %d' % (raw, secs))
+        logger.debug('rtc_sync: synced raw=%r -> %d', raw, secs)
         return secs
     except Exception as e:
-        _log('boot rtc_sync: date failed: %s' % e)
+        logger.warning('rtc_sync: date -s failed: %s', e)
         return None
 
 
