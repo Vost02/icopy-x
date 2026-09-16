@@ -2533,10 +2533,15 @@ class TimeSyncActivity(BaseActivity):
         except Exception:
             pass
 
-        # Send to GD32 RTC (best-effort)
+        # Send to GD32 RTC (best-effort).
+        # Correct protocol (STM32 firmware, sys_command_line.c cli_setrtc):
+        # the 'giveyoutime' command with a binary frame
+        #   T + <4-byte big-endian epoch> + A
+        # The old 'TIME:...' string is not a GD32 command and never worked.
         try:
-            import hmi_driver
-            hmi_driver._set_com('TIME:%s' % date_str)
+            import time as _time
+            import rtc_sync
+            rtc_sync.set_rtc(int(_time.time()))
         except Exception:
             pass
 
