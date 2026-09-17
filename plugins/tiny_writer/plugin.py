@@ -1,0 +1,630 @@
+"""Tiny Writer -- write an iCopy-X dump into a ChameleonMini / Tiny slot.
+
+The ChameleonMini / Tiny (proxgrind firmware, 2023 CI build or later) is
+expected on the iCopy-X USB host port and appears as a USB CDC serial device.
+Unlike the Chameleon Ultra, it uses a text command line (VERSION?, SETTING=,
+CONFIG=, UIDMODE=, SAKMODE=, ...) plus XModem for UPLOAD/DOWNLOAD.
+
+Supported dump families (recognized by the iCopy-X filename convention):
+    mf1     M1-<1K|4K|Mini>-<4B|7B>_<uid>_<n>.bin   -> MF_CLASSIC_1K[_7B] / 4K[_7B] / MINI_4B
+    mfu     NTAG213|NTAG215|NTAG216_<uid>_<n>.json  -> NTAG213 / NTAG215 / NTAG216
+
+The Chameleon memory image is byte-identical to the PM3 raw dump for MIFARE
+Classic, and the raw page image (4 bytes/page) for NTAG.
+
+Protocol reference: PROJECT-NOTES.md section 2.3.
+"""
+
+import glob
+import json
+import os
+import re
+import time
+
+PAGE_SIZE = 4
+BLOCK_SIZE = 16
+
+TINY_VID = 0x16D0
+TINY_PID = 0x04B2
+BAUD = 115200
+CMD_TIMEOUT = 2.5
+STORE_TIMEOUT = 15.0
+XMODEM_BLOCK = 128
+
+SOH = 0x01
+NAK = 0x15
+ACK = 0x06
+EOT = 0x04
+CAN = 0x18
+
+# MIFARE Classic: variant -> (blocks, {uidlen: CONFIG name})
+MFC_CAP = {
+    "1k": (64, {4: "MF_CLASSIC_1K", 7: "MF_CLASSIC_1K_7B"}),
+    "4k": (256, {4: "MF_CLASSIC_4K", 7: "MF_CLASSIC_4K_7B"}),
+    "mini": (20, {4: "MF_CLASSIC_MINI_4B"}),
+}
+MFC_NAME_RE = re.compile(
+    r"^M1-(1K|4K|Mini)-(4B|7B)_[0-9A-Fa-f]+_\d+$", re.IGNORECASE)
+
+# NTAG: tag -> (pages, memory size in bytes)
+NTAG_CFG = {
+    "NTAG213": (45, 180),
+    "NTAG215": (135, 540),
+    "NTAG216": (231, 924),
+}
+MFU_NAME_RE = re.compile(
+    r"^(NTAG213|NTAG215|NTAG216)_[0-9A-Fa-f]+_\d+$", re.IGNORECASE)
+
+# SAKMODE is only accepted by the firmware for the 4-byte 1K/4K configs;
+# the _7B variants reply 201:INVALID COMMAND USAGE.
+SAKMODE_CONFIGS = ("MF_CLASSIC_1K", "MF_CLASSIC_4K")
+
+DUMP_DIRS = (
+    "/mnt/upan/dump/mf1",
+    "/mnt/upan/dump/mfu",
+)
+
+
+class TinyError(Exception):
+    pass
+
+
+class TinyTimeout(TinyError):
+    pass
+
+
+class TinyCommandError(TinyError):
+    def __init__(self, cmd, code, text, step=""):
+        self.cmd = cmd
+        self.code = code
+        self.text = text
+        self.step = step
+        where = " while '%s'" % step if step else ""
+        super(TinyCommandError, self).__init__(
+            "command %r%s failed: %d:%s" % (cmd, where, code, text))
+
+
+# ---------------------------------------------------------------------------
+# Dump detection / parsing
+# ---------------------------------------------------------------------------
+
+def _detect_dump(path):
+    name = os.path.splitext(os.path.basename(path))[0]
+
+    match = MFC_NAME_RE.match(name)
+    if match:
+        variant = match.group(1).lower()
+        info = MFC_CAP.get(variant)
+        if info:
+            blocks, cfgs = info
+            uidlen = 7 if match.group(2).upper() == "7B" else 4
+            config = cfgs.get(uidlen)
+            if config:
+                return {"kind": "mf1", "config": config, "type_name": config,
+                        "blocks": blocks, "memsize": blocks * BLOCK_SIZE,
+                        "uidlen": uidlen}
+
+    match = MFU_NAME_RE.match(name)
+    if match:
+        tag = match.group(1).upper()
+        pages, memsize = NTAG_CFG[tag]
+        return {"kind": "mfu", "config": tag, "type_name": tag,
+                "pages": pages, "memsize": memsize, "uidlen": 7}
+
+    return None
+
+
+def _parse_mfu_pages(path):
+    """Return the raw page image from a PM3 mfu dump (json preferred)."""
+    json_path = os.path.splitext(path)[0] + ".json"
+    if os.path.isfile(json_path):
+        with open(json_path, "r", errors="ignore") as fh:
+            doc = json.load(fh)
+        blocks = doc.get("blocks", {}) or {}
+        buf = bytearray()
+        i = 0
+        while str(i) in blocks and blocks[str(i)]:
+            buf += bytes.fromhex(blocks[str(i)])
+            i += 1
+        if buf:
+            return bytes(buf)
+    with open(path, "rb") as fh:
+        raw = fh.read()
+    if len(raw) < 60:
+        raise TinyError("%s: mfu dump too short (%d bytes)" % (
+            os.path.basename(path), len(raw)))
+    # version(8) + 4 + signature(32) + counters(12) + pages
+    return raw[56:]
+
+
+def _read_dump(path, meta):
+    kind = meta["kind"]
+    if kind == "mf1":
+        with open(path, "rb") as fh:
+            data = fh.read()
+        if len(data) != meta["memsize"]:
+            raise TinyError("%s: %d bytes but name implies %d" % (
+                os.path.basename(path), len(data), meta["memsize"]))
+        return data
+    if kind == "mfu":
+        pages = _parse_mfu_pages(path)
+        if len(pages) < meta["memsize"]:
+            raise TinyError("%s: %d page bytes, need %d for %s" % (
+                os.path.basename(path), len(pages), meta["memsize"], meta["config"]))
+        return pages[:meta["memsize"]]
+    raise TinyError("unknown dump kind: %s" % kind)
+
+
+def _uid_of(data, meta):
+    if meta["kind"] == "mfu":
+        return data[0:3] + data[4:8]
+    return data[:meta["uidlen"]]
+
+
+# ---------------------------------------------------------------------------
+# Transport / device
+# ---------------------------------------------------------------------------
+
+class _TinyTransport(object):
+    def __init__(self, port, baud=BAUD):
+        import serial
+        self.ser = serial.Serial(port=port, baudrate=baud, timeout=0.05)
+        try:
+            self.ser.dtr = True
+        except Exception:
+            pass
+        try:
+            self.ser.reset_input_buffer()
+        except Exception:
+            pass
+
+    def write(self, data):
+        self.ser.write(data)
+        self.ser.flush()
+
+    def read_some(self, timeout):
+        self.ser.timeout = timeout
+        return self.ser.read(4096)
+
+    def reset_input(self):
+        try:
+            self.ser.reset_input_buffer()
+        except Exception:
+            pass
+
+    def close(self):
+        try:
+            self.ser.close()
+        except Exception:
+            pass
+
+
+class _Tiny(object):
+    def __init__(self, transport):
+        self.t = transport
+        self.rx = bytearray()
+
+    # -- buffered receive --------------------------------------------------
+    def _recv(self, timeout):
+        if self.rx:
+            out = bytes(self.rx)
+            self.rx.clear()
+            return out
+        return self.t.read_some(timeout)
+
+    def _read_byte(self, timeout):
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            b = self._recv(0.5)
+            if b:
+                if len(b) > 1:
+                    self.rx += b[1:]
+                return b[0]
+        return None
+
+    def _read_exact(self, n, timeout):
+        out = bytearray()
+        deadline = time.time() + timeout
+        while len(out) < n and time.time() < deadline:
+            b = self._recv(0.5)
+            if b:
+                out += b
+        if len(out) > n:
+            self.rx += out[n:]
+            del out[n:]
+        return bytes(out)
+
+    def _read_line(self, timeout):
+        buf = bytearray()
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            b = self._recv(0.2)
+            if not b:
+                continue
+            buf += b
+            if b"\n" in buf:
+                line, _, rest = bytes(buf).partition(b"\n")
+                self.rx += rest
+                return line.decode("ascii", "replace").rstrip("\r")
+        return bytes(buf).decode("ascii", "replace").rstrip("\r\n")
+
+    # -- line protocol -----------------------------------------------------
+    def command(self, text, timeout=CMD_TIMEOUT, step=""):
+        self.rx.clear()
+        self.t.reset_input()
+        self.t.write((text + "\r").encode("ascii"))
+        line = self._read_line(timeout)
+        if not line:
+            raise TinyTimeout("command %r%s timed out" % (
+                text, " while '%s'" % step if step else ""))
+        if ":" not in line:
+            raise TinyError("command %r: bad response %r" % (text, line))
+        code_s, msg = line.split(":", 1)
+        try:
+            code = int(code_s)
+        except ValueError:
+            raise TinyError("command %r: bad status %r" % (text, line))
+        extra = None
+        if code == 101:
+            extra = self._read_line(timeout)
+        return code, msg, extra
+
+    def value(self, text, timeout=CMD_TIMEOUT):
+        code, _msg, extra = self.command(text, timeout)
+        return extra
+
+    def expect_ok(self, text, step="", timeout=CMD_TIMEOUT):
+        code, msg, _extra = self.command(text, timeout, step)
+        if code != 100:
+            raise TinyCommandError(text, code, msg, step)
+
+    # -- XModem ------------------------------------------------------------
+    def upload(self, image, on_progress=None):
+        self.rx.clear()
+        self.t.reset_input()
+        self.t.write(b"UPLOAD\r")
+        line = self._read_line(CMD_TIMEOUT)
+        if not line.startswith("110"):
+            raise TinyError("UPLOAD: expected 110, got %r" % line)
+        if self._read_byte(8.0) != NAK:
+            raise TinyTimeout("UPLOAD: no NAK from device")
+
+        n = len(image)
+        pkt = 1
+        off = 0
+        while off < n:
+            blk = image[off:off + XMODEM_BLOCK]
+            off += XMODEM_BLOCK
+            if len(blk) < XMODEM_BLOCK:
+                blk = blk + b"\x00" * (XMODEM_BLOCK - len(blk))
+            self.t.write(bytes([SOH, pkt, 255 - pkt]) + blk + bytes([sum(blk) & 0xFF]))
+            if self._read_byte(3.0) != ACK:
+                raise TinyError("UPLOAD: no ACK for packet %d" % pkt)
+            if on_progress is not None:
+                on_progress(min(off, n), n)
+            pkt = (pkt + 1) % 256
+        self.t.write(bytes([EOT]))
+        if self._read_byte(3.0) != ACK:
+            raise TinyError("UPLOAD: no ACK for EOT")
+
+    def download(self):
+        self.rx.clear()
+        self.t.reset_input()
+        self.t.write(b"DOWNLOAD\r")
+        line = self._read_line(CMD_TIMEOUT)
+        if not line.startswith("110"):
+            raise TinyError("DOWNLOAD: expected 110, got %r" % line)
+        self.t.write(bytes([NAK]))
+        data = bytearray()
+        while True:
+            v = self._read_byte(6.0)
+            if v is None:
+                raise TinyTimeout("DOWNLOAD: timeout after %d bytes" % len(data))
+            if v == SOH:
+                rest = self._read_exact(2 + XMODEM_BLOCK + 1, 3.0)
+                if len(rest) < 2 + XMODEM_BLOCK + 1:
+                    raise TinyTimeout("DOWNLOAD: short frame")
+                fno, nfno = rest[0], rest[1]
+                blk = rest[2:2 + XMODEM_BLOCK]
+                csum = rest[2 + XMODEM_BLOCK]
+                if (sum(blk) & 0xFF) == csum and (fno + nfno) == 0xFF:
+                    data += blk
+                    self.t.write(bytes([ACK]))
+                else:
+                    self.t.write(bytes([NAK]))
+            elif v == EOT:
+                self.t.write(bytes([ACK]))
+                break
+            elif v == CAN:
+                raise TinyError("DOWNLOAD: cancelled (CAN)")
+        return bytes(data)
+
+    def close(self):
+        self.t.close()
+
+
+def _candidate_ports():
+    ports = []
+    for pattern in ("/dev/ttyACM*", "/dev/ttyUSB*"):
+        ports.extend(sorted(glob.glob(pattern)))
+    for by_id in sorted(glob.glob("/dev/serial/by-id/*")):
+        try:
+            real = os.path.realpath(by_id)
+        except OSError:
+            real = by_id
+        if real not in ports:
+            ports.append(real)
+    return ports
+
+
+def _find_tiny(attempts=3, delay=0.4):
+    last = "no serial device found"
+    for _ in range(max(1, attempts)):
+        for dev in _candidate_ports():
+            transport = None
+            try:
+                transport = _TinyTransport(dev)
+                tiny = _Tiny(transport)
+                code, _msg, extra = tiny.command("VERSION?", timeout=1.5)
+                if code == 101 and extra and "Chameleon" in extra:
+                    transport = None  # keep this port open (finally must not close it)
+                    return tiny, dev, extra
+                last = "%s: %r" % (dev, extra or code)
+            except Exception as exc:
+                last = "%s: %s" % (dev, exc)
+            finally:
+                if transport is not None:
+                    try:
+                        transport.close()
+                    except Exception:
+                        pass
+        time.sleep(delay)
+    raise TinyError(last)
+
+
+def _dump_dirs():
+    override = os.environ.get("TINY_WRITER_DUMP_DIR")
+    if not override:
+        override = os.environ.get("ULTRA_WRITER_DUMP_DIR")
+    if override:
+        return (override,)
+    return DUMP_DIRS
+
+
+def _scan_dumps():
+    out = []
+    for directory in _dump_dirs():
+        try:
+            names = sorted(os.listdir(directory))
+        except OSError:
+            continue
+        # A dump may have both .bin and .json siblings; keep one (prefer .bin,
+        # whose .json is read as a side file by _parse_mfu_pages).
+        by_base = {}
+        order = []
+        for name in names:
+            if not name.lower().endswith((".bin", ".json")):
+                continue
+            base = os.path.splitext(name)[0]
+            if base not in by_base:
+                by_base[base] = name
+                order.append(base)
+            elif name.lower().endswith(".bin"):
+                by_base[base] = name
+        for base in order:
+            path = os.path.join(directory, by_base[base])
+            meta = _detect_dump(path)
+            if meta is None:
+                continue
+            try:
+                data = _read_dump(path, meta)
+            except (OSError, TinyError, ValueError):
+                continue
+            out.append({"path": path, "name": base,
+                        "uid": _uid_of(data, meta).hex().upper(), "meta": meta})
+    return out
+
+
+# ---------------------------------------------------------------------------
+# Plugin
+# ---------------------------------------------------------------------------
+
+class TinyWriterPlugin(object):
+    """Entry class for the Tiny Writer plugin."""
+
+    def __init__(self, host=None):
+        self.host = host
+        self._tiny = None
+        self._port = None
+        self._version = None
+        self._dumps = []
+        self._entry = None
+        self._slot = 1
+
+    # -- host helpers --------------------------------------------------
+
+    def _set(self, key, value):
+        if self.host is not None:
+            self.host.set_var(key, value)
+
+    def _progress(self, value, message):
+        if self.host is not None:
+            self.host.set_progress(value, message)
+
+    def _selected_index(self, state_id):
+        list_state = getattr(self.host, "_list_state", None) or {}
+        entry = list_state.get(state_id) or {}
+        try:
+            return int(entry.get("selected", 0))
+        except (TypeError, ValueError):
+            return 0
+
+    def _set_list_items(self, state_id, items):
+        screens = getattr(self.host, "_screens", None)
+        if not screens or state_id not in screens:
+            return False
+        state_def = screens[state_id]
+        screen = state_def.get("screen", state_def)
+        content = screen.setdefault("content", {})
+        content["type"] = "list"
+        content["items"] = items
+        return True
+
+    # -- lifecycle -----------------------------------------------------
+
+    def on_destroy(self):
+        self._close()
+
+    def _close(self):
+        if self._tiny is not None:
+            try:
+                self._tiny.close()
+            except Exception:
+                pass
+            self._tiny = None
+
+    # -- UI methods ----------------------------------------------------
+
+    def start(self):
+        self._set("error_msg", "")
+        self._set("progress_value", 0)
+        self._set("progress_message", "")
+
+        try:
+            dumps = _scan_dumps()
+        except Exception as exc:
+            self._set("error_msg", "Dump scan failed:\n%s" % exc)
+            return {"status": "error"}
+
+        if not dumps:
+            self._set(
+                "error_msg",
+                "No supported dump found.\n\nLooked for iCopy-X dumps:\n"
+                "M1-1K/4K/Mini-4B/7B_...\nNTAG213/215/216_...\n"
+                "in /mnt/upan/dump/")
+            return {"status": "error"}
+
+        self._dumps = dumps
+        labels = []
+        for entry in dumps:
+            name = entry["name"]
+            short = name if len(name) <= 28 else name[:27] + "~"
+            labels.append({"label": short, "action": "run:choose_dump"})
+        self._set_list_items("select_dump", labels)
+
+        self._close()
+        try:
+            tiny, port, version = _find_tiny()
+        except Exception as exc:
+            self._set("error_msg", "Chameleon Mini/Tiny not found.\n\n%s" % exc)
+            return {"status": "error"}
+
+        self._tiny = tiny
+        self._port = port
+        self._version = version
+        return {"status": "ready"}
+
+    def choose_dump(self):
+        idx = self._selected_index("select_dump")
+        if idx < 0 or idx >= len(self._dumps):
+            self._set("error_msg", "Dump selection out of range")
+            return {"status": "error"}
+        entry = self._dumps[idx]
+        try:
+            data = _read_dump(entry["path"], entry["meta"])
+        except Exception as exc:
+            self._set("error_msg", "Cannot read dump:\n%s" % exc)
+            return {"status": "error"}
+        entry["data"] = data
+        self._entry = entry
+        meta = entry["meta"]
+        self._set("dump_name", entry["name"])
+        self._set("dump_uid", entry["uid"])
+        self._set("card_type", "%s, UID %dB" % (meta["type_name"], meta["uidlen"]))
+        return {"status": "ready"}
+
+    def choose_slot(self):
+        idx = self._selected_index("select_slot")
+        if idx < 0 or idx > 7:
+            self._set("error_msg", "Invalid slot")
+            return {"status": "error"}
+        self._slot = idx + 1
+        self._set("slot_text", "Slot %d" % (idx + 1))
+        return {"status": "ready"}
+
+    def do_write(self):
+        try:
+            return self._do_write()
+        except TinyCommandError as exc:
+            self._set("result_title", "Write Failed")
+            self._set("result_detail", str(exc))
+            return {"status": "fail"}
+        except Exception as exc:
+            self._set("result_title", "Write Failed")
+            self._set("result_detail", "%s: %s" % (type(exc).__name__, exc))
+            return {"status": "fail"}
+
+    # -- core ----------------------------------------------------------
+
+    def _do_write(self):
+        entry = self._entry
+        meta = entry["meta"]
+        data = entry["data"]
+        slot = self._slot
+        kind = meta["kind"]
+
+        tiny = self._tiny
+        if tiny is None:
+            self._progress(2, "Connecting")
+            tiny, port, version = _find_tiny()
+            self._tiny = tiny
+            self._port = port
+
+        self._progress(4, "SETTING=%d" % slot)
+        tiny.expect_ok("SETTING=%d" % slot, step="select slot")
+        self._progress(8, "CONFIG=%s" % meta["config"])
+        tiny.expect_ok("CONFIG=%s" % meta["config"], step="set config")
+        if kind == "mf1":
+            self._progress(12, "UIDMODE=0")
+            tiny.expect_ok("UIDMODE=0", step="standard card")
+            if meta["config"] in SAKMODE_CONFIGS:
+                self._progress(14, "SAKMODE=1")
+                tiny.expect_ok("SAKMODE=1", step="SAK/ATQA from block 0")
+        self._progress(16, "CLEAR")
+        tiny.expect_ok("CLEAR", step="clear slot")
+
+        def on_up(off, total):
+            self._progress(16 + int(60 * off / max(total, 1)), "Writing %d/%d" % (off, total))
+
+        tiny.upload(data, on_progress=on_up)
+
+        self._progress(80, "STORE")
+        tiny.expect_ok("STORE", step="store to flash", timeout=STORE_TIMEOUT)
+        time.sleep(0.2)
+
+        self._progress(86, "Verify")
+        back = tiny.download()
+        memsize = meta["memsize"]
+        if bytes(back[:memsize]) != bytes(data[:memsize]):
+            first = next((i for i in range(min(len(back), memsize))
+                          if back[i] != data[i]), None)
+            where = ("offset 0x%04X: %02X vs %02X" % (first, data[first], back[first])
+                     if first is not None else "length")
+            raise TinyError("verify mismatch at %s" % where)
+
+        self._progress(96, "Readback OK")
+        cfg = tiny.value("CONFIG?")
+        uid = tiny.value("UID?")
+        self._progress(100, "Done")
+
+        self._set("result_title", "Success")
+        self._set("result_detail", "\n".join([
+            "%s -> %s" % (meta["type_name"], self._slot_text()),
+            "DOWNLOAD %d B identical" % memsize,
+            "CONFIG %s" % cfg,
+            "UID %s" % uid,
+        ]))
+        return {"status": "ok"}
+
+    def _slot_text(self):
+        return "Slot %d" % self._slot
