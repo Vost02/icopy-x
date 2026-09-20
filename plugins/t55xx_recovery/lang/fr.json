@@ -1,0 +1,15 @@
+{
+    "T55xx Recovery": "Récupération T55xx",
+    "This recovers a": "Récupère un tag T55xx",
+    "softbricked T55xx tag": "en soft-brick",
+    "Place tag on reader": "Placez le tag sur le lecteur",
+    "then press OK": "puis appuyez sur OK",
+    "Press OK to retry": "Appuyez sur OK pour réessayer",
+    "Recovering...": "Récupération...",
+    "Wiping tag...": "Effacement du tag...",
+    "Detecting...": "Détection...",
+    "Checking passwords...": "Vérif. mots de passe...",
+    "Could not detect\nT55xx B0": "Détection impossible\ndu B0 T55xx",
+    "Tag recovered!": "Tag récupéré !",
+    "Import error": "Erreur d'importation"
+}

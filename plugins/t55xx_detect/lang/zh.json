@@ -1,0 +1,19 @@
+{
+    "T55xx Detect": "T55xx检测",
+    "Place T55xx on reader": "将T55xx放到读卡器上",
+    "Detect with password?": "带密码检测？",
+    "No Pwd": "无密码",
+    "With Pwd": "有密码",
+    "Current password": "当前密码",
+    "Chip: {chip}": "芯片: {chip}",
+    "Mod:  {modulation}": "调制:  {modulation}",
+    "Rate: {bitrate}": "速率: {bitrate}",
+    "Inv:  {inverted}": "反相:  {inverted}",
+    "Pwd:  {pwd_set}": "密码:  {pwd_set}",
+    "DL:   {downlink}": "下行:  {downlink}",
+    "Detect failed": "检测失败",
+    "Is tag pwd bit set?": "卡片密码位已设置吗？",
+    "Starting...": "启动中...",
+    "Detecting T55xx...": "检测T55xx中...",
+    "Parsing results...": "解析结果中..."
+}

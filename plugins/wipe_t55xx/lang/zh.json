@@ -1,0 +1,19 @@
+{
+    "T55xx Wipe": "T55xx擦除",
+    "Place T55xx on reader": "将T55xx放到读卡器上",
+    "Wipe with password?": "带密码擦除？",
+    "No Pwd": "无密码",
+    "With Pwd": "有密码",
+    "Current password": "当前密码",
+    "Wipe": "擦除",
+    "Wipe complete!": "擦除完成！",
+    "Press OK to retry": "按 OK 重试",
+    "Starting...": "启动中...",
+    "Wiping T55xx...": "擦除T55xx中...",
+    "T55xx wiped cleanly": "T55xx已完全擦除",
+    "Wipe failed": "擦除失败",
+    "Detect after wipe failed": "擦除后检测失败",
+    "Need 8 hex chars": "需要8位hex字符",
+    "No password stored": "未存储密码",
+    "Import error": "导入错误"
+}

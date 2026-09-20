@@ -1,0 +1,19 @@
+{
+    "T55xx Detect": "Détection T55xx",
+    "Place T55xx on reader": "Placez T55xx sur le lecteur",
+    "Detect with password?": "Détecter avec mot de passe ?",
+    "No Pwd": "Sans mdp",
+    "With Pwd": "Avec mdp",
+    "Current password": "Mot de passe actuel",
+    "Chip: {chip}": "Puce: {chip}",
+    "Mod:  {modulation}": "Mod:  {modulation}",
+    "Rate: {bitrate}": "Taux: {bitrate}",
+    "Inv:  {inverted}": "Inv:  {inverted}",
+    "Pwd:  {pwd_set}": "Mdp:  {pwd_set}",
+    "DL:   {downlink}": "DL:   {downlink}",
+    "Detect failed": "Échec de la détection",
+    "Is tag pwd bit set?": "Bit mdp du tag activé ?",
+    "Starting...": "Démarrage...",
+    "Detecting T55xx...": "Détection T55xx...",
+    "Parsing results...": "Analyse des résultats..."
+}

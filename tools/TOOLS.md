@@ -80,3 +80,9 @@ Each Scan scenario produces in `docs/screenshots/Scan/scenarios/scan_{type}/`:
 | ELT (all caps) | Entry + Log + Toast all PASS |
 | Elt, ELt, etc. | Lowercase = that check FAILED |
 | BOOT_FAIL | QEMU didn't start |
+
+## Plugin Translations
+
+| Tool | Purpose |
+|------|---------|
+| `plugin_i18n.py` | Plugin translation packs (`plugins/<name>/lang/<code>.json`, keyed by English text). `extract` writes the `en.json` template, `fill --lang xx` scaffolds a pack, `check [--require]` verifies coverage and placeholders (used by the test-suite). |

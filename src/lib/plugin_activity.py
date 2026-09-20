@@ -102,6 +102,7 @@ class PluginActivity(BaseActivity):
         self._plugin_dir = None
         self._manifest = {}
         self._ui_def = None
+        self._translations = {}
         self._plugin_instance = None
         self._renderer = None
         self._state = {}              # variable state for {placeholder} resolution
@@ -135,14 +136,16 @@ class PluginActivity(BaseActivity):
         self._ui_def = bundle.get('ui_definition')
         self._entry_class = bundle.get('entry_class')
         self._permissions = self._manifest.get('permissions', [])
+        self._translations = bundle.get('translations') or {}
 
-        plugin_name = self._manifest.get('name', 'Plugin')
+        plugin_name = self.tr(self._manifest.get('name', 'Plugin'))
 
         # Set up the renderer on our canvas
         canvas = self.getCanvas()
         if canvas is not None:
             self._renderer = JsonRenderer(canvas)
             self._renderer.set_state(self._state)
+            self._renderer.set_translator(self.tr)
 
         # If entry_class is a BaseActivity subclass with no ui.json,
         # delegate entirely: launch it as a child activity.
@@ -436,7 +439,7 @@ class PluginActivity(BaseActivity):
             if label:
                 canvas.create_text(
                     SCREEN_W // 2, CONTENT_Y0 + 20,
-                    text=label, fill='#000000',
+                    text=self.tr(label), fill='#000000',
                     font=resources.get_font(13),
                     anchor='center', tags='_jr_content',
                 )
@@ -813,6 +816,21 @@ class PluginActivity(BaseActivity):
             logger.error("shell_command error: %s", traceback.format_exc())
             return (-1, '', str(exc))
 
+    def tr(self, text):
+        """Translate an English display string into the active language.
+
+        Looks in the plugin's own packs (plugins/<name>/lang/<code>.json)
+        first, then in the core language pack, and returns the text
+        unchanged when neither knows it.  Static ui.json text, the
+        manifest name, toasts and string values stored with set_var()
+        are translated automatically; call this yourself only for a
+        string you build at runtime, on the template, before formatting:
+
+            self.host.set_var('error_msg',
+                              self.host.tr('Clone failed: %s') % detail)
+        """
+        return resources.tr_plugin(text, self._translations)
+
     def set_var(self, key, value):
         """Set a variable for {placeholder} resolution in screen templates.
 
@@ -857,6 +875,8 @@ class PluginActivity(BaseActivity):
             timeout: Auto-dismiss in milliseconds (0 = persistent).
             icon: Icon name ('check', 'error', 'warning', 'info', or None).
         """
+        text = self.tr(text)
+
         def _show():
             self._ensure_toast()
             try:

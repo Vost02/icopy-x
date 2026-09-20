@@ -1,0 +1,15 @@
+{
+    "T55xx Recovery": "T55xx恢复",
+    "This recovers a": "此功能恢复",
+    "softbricked T55xx tag": "软变砖的T55xx卡",
+    "Place tag on reader": "将卡放到读卡器上",
+    "then press OK": "然后按 OK",
+    "Press OK to retry": "按 OK 重试",
+    "Recovering...": "恢复中...",
+    "Wiping tag...": "擦除卡片中...",
+    "Detecting...": "检测中...",
+    "Checking passwords...": "检测密码中...",
+    "Could not detect\nT55xx B0": "无法检测到\nT55xx B0",
+    "Tag recovered!": "卡片已恢复！",
+    "Import error": "导入错误"
+}

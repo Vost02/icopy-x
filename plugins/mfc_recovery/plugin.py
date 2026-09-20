@@ -402,7 +402,7 @@ class MFCRecoveryPlugin(object):
             done += 1
             self.host.set_progress(
                 25 + int(done * 40 / max(len(missing), 1)),
-                'Nested %d/%d (S%d %s)' % (done, len(missing), sector, ktype))
+                self.host.tr('Nested %d/%d (S%d %s)') % (done, len(missing), sector, ktype))
             self._targeted_nested(hfmfkeys, mifare, seed, sector, ktype)
 
     def _recover_full(self, hfmfkeys, size, size_const, seed):

@@ -276,7 +276,7 @@ class T55xxBlockReaderPlugin(object):
                 break
             hex_val = blocks.get(b, '????????')
             self.host.set_var('result_l%d' % line_idx,
-                              'B%d: %s' % (b, hex_val))
+                              self.host.tr('B%d: %s') % (b, hex_val))
             line_idx += 1
 
     def _run_read(self, pwd=None):

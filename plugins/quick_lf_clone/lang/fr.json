@@ -1,0 +1,18 @@
+{
+    "Quick LF Clone": "Clonage LF rapide",
+    "Place source tag on reader": "Placez tag source sur lecteur",
+    "Press OK to scan": "Appuyez sur OK pour scanner",
+    "Found: {tag_type}": "Détecté : {tag_type}",
+    "ID: {tag_id}": "ID : {tag_id}",
+    "Place blank T55xx, press OK": "Placez T55xx vierge, puis OK",
+    "Clone successful!": "Clonage réussi !",
+    "Press OK to restart": "Appuyez sur OK pour recommencer",
+    "Press OK to retry": "Appuyez sur OK pour réessayer",
+    "No tag detected": "Aucun tag détecté",
+    "Could not identify tag": "Tag non identifié",
+    "No tag data available": "Aucune donnée de tag",
+    "Clone failed: no response": "Échec clonage : sans réponse",
+    "Clone failed: %s": "Échec clonage : %s",
+    "Clone not supported for %s": "Clonage non supporté pour %s",
+    "unknown error": "erreur inconnue"
+}

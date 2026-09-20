@@ -103,6 +103,28 @@ class StringEN:
         'edit': 'Edit',
         'delete': 'Delete',
         'details': 'Details',
+        # Shared plugin soft-key labels (plugins fall back to the core
+        # pack for these, see tr_plugin).
+        'again': 'Again',
+        'confirm': 'Confirm',
+        'menu': 'Menu',
+        'next': 'Next',
+        'prev': 'Prev',
+        'done': 'Done',
+        'exit': 'Exit',
+        'select': 'Select',
+        'skip': 'Skip',
+        'continue': 'Continue',
+        'load': 'Load',
+        'set': 'Set',
+        'add': 'Add',
+        'add_more': 'Add More',
+        'clone': 'Clone',
+        'detect': 'Detect',
+        'recover': 'Recover',
+        'backup': 'Backup',
+        'single': 'Single',
+        'range': 'Range',
     }
 
     title = {
@@ -608,6 +630,34 @@ def tr(text):
     if key is None:
         return text
     return _resolve_key(key)
+
+
+def tr_plugin(text, translations):
+    """Translate a plugin's English display string.
+
+    Plugins write their UI in English (manifest name, ui.json, strings
+    handed to the host API) and ship optional packs next to their code,
+    plugins/<name>/lang/<code>.json, keyed by the exact English text.
+    Lookup is layered, first hit wins:
+
+      1. the plugin's own pack for the active language
+         (``translations[code][text]``),
+      2. the core pack, by English value (see ``tr``), so common labels
+         such as "Back" need no per-plugin entry,
+      3. the text itself.
+
+    English is a no-op and non-string input passes through unchanged, so
+    the call is safe on dynamic data.  ``translations`` may be None.
+    """
+    if not isinstance(text, str) or not text or _current_language == 'en':
+        return text
+    if translations:
+        pack = translations.get(_current_language)
+        if pack:
+            val = pack.get(text)
+            if isinstance(val, str) and val:
+                return val
+    return tr(text)
 
 
 def get_font(size=13, *args):

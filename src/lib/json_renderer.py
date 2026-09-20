@@ -94,17 +94,43 @@ class JsonRenderer:
         self.canvas = canvas
         self.state = {}
         self._icon_cache = {}
+        self._translate = None
 
     def set_state(self, state_dict):
         """Update placeholder context for {variable} resolution."""
         self.state.update(state_dict)
 
+    def set_translator(self, translate):
+        """Install the text translator applied by resolve() (None: off).
+
+        ``translate`` takes an English display string and returns the
+        localized one.  It runs on the *template*, before {placeholders}
+        are filled, so "Found: {tag_type}" is looked up as written in the
+        screen definition.  String state values are translated the same
+        way when substituted, so a message stored with set_var() is
+        localized too while the state itself stays English.
+        """
+        self._translate = translate
+
+    def _display_state(self):
+        """State dict as substituted into templates."""
+        if self._translate is None:
+            return self.state
+        return dict(
+            (k, self._translate(v) if isinstance(v, str) else v)
+            for k, v in self.state.items()
+        )
+
     def resolve(self, text):
-        """Resolve {variable} placeholders."""
-        if not text or not isinstance(text, str) or '{' not in text:
+        """Translate *text* (if a translator is set), then fill {variables}."""
+        if not text or not isinstance(text, str):
+            return text
+        if self._translate is not None:
+            text = self._translate(text)
+        if '{' not in text:
             return text
         try:
-            return text.format(**self.state)
+            return text.format(**self._display_state())
         except (KeyError, ValueError, IndexError):
             return text
 
