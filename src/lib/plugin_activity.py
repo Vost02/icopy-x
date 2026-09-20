@@ -446,26 +446,28 @@ class PluginActivity(BaseActivity):
             )
             self._input_widget.show()
         else:
-            self._renderer.render(screen)
+            # Content only.  The button bar is owned by the framework
+            # (setLeftButton/setRightButton below) so that the M1/M2
+            # visible/active flags checked by callKeyEvent, long-label
+            # fitting and dismiss/disable all stay in sync with what is
+            # on screen.  Handing the buttons to the renderer as well
+            # drew every label twice (issue #22).
+            self._renderer.render(dict(screen, buttons={}))
 
-        # Handle buttons for M1/M2 active state
+        # Buttons: a plain string or {"text": ..., "active": bool}.
+        # Drawn once, through the framework, which also sets the
+        # M1/M2 visible/active flags that gate key dispatch.
         buttons = screen.get('buttons', {})
         left_btn = buttons.get('left')
         right_btn = buttons.get('right')
         if left_btn:
-            resolved = self._renderer.resolve(
-                left_btn if isinstance(left_btn, str)
-                else left_btn.get('text', '')
-            )
-            self.setLeftButton(resolved)
+            text, active = self._renderer.parse_button(left_btn)
+            self.setLeftButton(self._renderer.resolve(text), active=active)
         else:
             self.dismissButton(left=True)
         if right_btn:
-            resolved = self._renderer.resolve(
-                right_btn if isinstance(right_btn, str)
-                else right_btn.get('text', '')
-            )
-            self.setRightButton(resolved)
+            text, active = self._renderer.parse_button(right_btn)
+            self.setRightButton(self._renderer.resolve(text), active=active)
         else:
             self.dismissButton(right=True)
 

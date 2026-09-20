@@ -9,11 +9,16 @@ Covers:
 All tests run headless via MockCanvas and actstack._canvas_factory.
 """
 
+import copy
+
 import pytest
 
 from tests.ui.conftest import MockCanvas
 import actstack
-from _constants import KEY_PWR, KEY_UP, KEY_DOWN, KEY_OK, KEY_M1, KEY_M2
+from _constants import (
+    KEY_PWR, KEY_UP, KEY_DOWN, KEY_OK, KEY_M1, KEY_M2,
+    BTN_BAR_Y0, TAG_BTN_LEFT, TAG_BTN_RIGHT,
+)
 from plugin_activity import PluginActivity
 
 
@@ -236,3 +241,50 @@ class TestPluginHelpers:
         items_after = len(canvas.find_all())
         # Toast should add at least one canvas item
         assert items_after > items_before
+
+
+# =====================================================================
+# TestButtonBar (issue #22)
+# =====================================================================
+
+class TestButtonBar:
+    """The framework owns the plugin button bar: each label drawn once.
+
+    Regression for issue #22, where JsonRenderer._render_buttons and
+    setLeftButton/setRightButton both painted the same label.
+    """
+
+    @staticmethod
+    def _bar_texts(canvas):
+        return sorted(
+            canvas.itemcget(i, 'text') for i in canvas.find_withtag('all')
+            if canvas.type(i) == 'text' and canvas.coords(i)[1] >= BTN_BAR_Y0
+        )
+
+    def test_labels_drawn_exactly_once(self):
+        ui = copy.deepcopy(TEST_UI)
+        ui['states']['main']['screen']['buttons'] = {
+            'left': 'Back', 'right': 'Clone'}
+        act = _start_plugin(ui=ui)
+        canvas = act.getCanvas()
+        assert self._bar_texts(canvas) == ['Back', 'Clone']
+        assert len(canvas.find_withtag('_jr_buttons')) == 0
+        assert len(canvas.find_withtag(TAG_BTN_LEFT)) == 1
+        assert len(canvas.find_withtag(TAG_BTN_RIGHT)) == 1
+
+    def test_labels_still_single_after_state_change(self):
+        act = _start_plugin()
+        act.callKeyEvent(KEY_OK)  # main -> second
+        assert act._current_state_id == 'second'
+        assert self._bar_texts(act.getCanvas()) == ['Back']
+
+    def test_inactive_button_is_dimmed_and_gated(self):
+        ui = copy.deepcopy(TEST_UI)
+        ui['states']['main']['screen']['buttons'] = {
+            'left': 'Back', 'right': {'text': 'Clone', 'active': False}}
+        ui['states']['main']['screen']['keys']['M2'] = 'set_state:second'
+        act = _start_plugin(ui=ui)
+        assert act._m2_visible is True
+        assert act._m2_active is False
+        act.callKeyEvent(KEY_M2)
+        assert act._current_state_id == 'main'

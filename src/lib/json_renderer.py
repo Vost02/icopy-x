@@ -531,7 +531,7 @@ class JsonRenderer:
     # ================================================================
 
     @staticmethod
-    def _parse_button(btn):
+    def parse_button(btn):
         """Parse a button spec into (text, active).
 
         Accepts:
@@ -559,8 +559,8 @@ class JsonRenderer:
                            tags='_jr_buttons')
         font = resources.get_font(16)
 
-        left_text, left_active = self._parse_button(left)
-        right_text, right_active = self._parse_button(right)
+        left_text, left_active = self.parse_button(left)
+        right_text, right_active = self.parse_button(right)
 
         if left_text:
             text = self.resolve(left_text)
