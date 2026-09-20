@@ -194,7 +194,7 @@ class PluginsMenuActivity(BaseActivity):
 
     def _updateTitle(self):
         """Update title: "Plugins N/M"."""
-        base_title = "Plugins"
+        base_title = resources.get_str('plugins')
         if self.lv_plugins is not None:
             total = self.lv_plugins.getPageCount()
             current = self.lv_plugins.getPagePosition() + 1
