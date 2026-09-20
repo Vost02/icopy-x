@@ -191,7 +191,7 @@ class MainActivity(BaseActivity):
             self.lv_main_page = ListView(
                 canvas, xy=xy, text_size=text_size, item_height=LIST_ITEM_H,
             )
-            labels = [resources.tr(item[0]) for item in self._menu_items]
+            labels = [self._menu_label(item) for item in self._menu_items]
             self.lv_main_page.setItems(labels)
             self._labels_lang = resources.getLanguage()
             icons = [item[1] for item in self._menu_items]
@@ -216,7 +216,7 @@ class MainActivity(BaseActivity):
         if self.lv_main_page is not None:
             if resources.getLanguage() != self._labels_lang:
                 selected = self.lv_main_page.selection()
-                labels = [resources.tr(item[0]) for item in self._menu_items]
+                labels = [self._menu_label(item) for item in self._menu_items]
                 self.lv_main_page.setItems(labels)
                 self.lv_main_page.setSelection(selected)
                 self._labels_lang = resources.getLanguage()
@@ -304,6 +304,7 @@ class MainActivity(BaseActivity):
                         'ui_definition': info.ui_definition,
                         'entry_class': info.activity_class,
                         'plugin_key': info.key,
+                        'translations': getattr(info, 'translations', None),
                     }
 
         actstack.start_activity(act_cls, bundle)
@@ -387,6 +388,19 @@ class MainActivity(BaseActivity):
             self.setTitle('%s %d/%d' % (base_title, current, total))
         else:
             self.setTitle(base_title)
+
+    def _menu_label(self, item):
+        """Localized label for a menu item.
+
+        Built-in entries translate through the core pack; a promoted
+        plugin's entry translates through that plugin's own pack first.
+        """
+        label, _icon, action_key = item
+        if action_key.startswith('plugin:'):
+            info = self._find_plugin_info(action_key[7:])
+            return resources.tr_plugin(
+                label, getattr(info, 'translations', None))
+        return resources.tr(label)
 
     def _find_plugin_info(self, plugin_key):
         """Look up a PluginInfo by its key from the discovered plugins.

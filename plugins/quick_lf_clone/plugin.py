@@ -132,7 +132,7 @@ class QuickLFClonePlugin(object):
         if template is None:
             self.host.set_var(
                 'error_msg',
-                'Clone not supported for %s' % tag_type
+                self.host.tr('Clone not supported for %s') % tag_type
             )
             return {'status': 'error'}
 
@@ -158,6 +158,7 @@ class QuickLFClonePlugin(object):
 
         self.host.set_var(
             'error_msg',
-            'Clone failed: %s' % (error_detail or 'unknown error')
+            self.host.tr('Clone failed: %s')
+            % (error_detail or self.host.tr('unknown error'))
         )
         return {'status': 'error'}

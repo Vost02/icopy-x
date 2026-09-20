@@ -58,7 +58,7 @@ class HFDeepScanPlugin(object):
         for idx, (name, cmd) in enumerate(_HF_COMMANDS):
             # Update progress: percentage based on command index
             pct = int((idx * 100) / total)
-            self.host.set_progress(pct, "Scanning: %s..." % name)
+            self.host.set_progress(pct, self.host.tr("Scanning: %s...") % name)
 
             result_lines.append(">> %s" % name)
 

@@ -1,0 +1,21 @@
+{
+    "Chk T55xx Pwds": "Vérif mdp T55xx",
+    "Place T55xx tag on reader": "Placez le tag T55xx sur lecteur",
+    "Press OK or Start": "Appuyez sur OK ou Démarrer",
+    "Password found:": "Mot de passe trouvé :",
+    "Wipe tag with this password?": "Effacer le tag avec ce mdp ?",
+    "Wipe": "Effacer",
+    "Wipe complete!": "Effacement réussi !",
+    "Password was:": "Ancien mot de passe :",
+    "No password found": "Aucun mot de passe trouvé",
+    "Press OK to retry": "Appuyez sur OK pour réessayer",
+    "Starting...": "Démarrage...",
+    "Dictionary loaded...": "Dictionnaire chargé...",
+    "Checking passwords...": "Vérif. mots de passe...",
+    "Parsing results...": "Analyse des résultats...",
+    "Wiping tag...": "Effacement du tag...",
+    "No password stored": "Aucun mot de passe stocké",
+    "Wipe failed": "Échec de l'effacement",
+    "Import error": "Erreur d'importation",
+    "Copy error": "Erreur de copie"
+}

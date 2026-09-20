@@ -46,11 +46,11 @@ class PM3RawPlugin(object):
         if success and output:
             lines = [l.strip() for l in output.split('\n') if l.strip()]
             # Limit to 8 lines to fit the 240x240 screen
-            display = '\n'.join(lines[:8]) if lines else '(empty response)'
+            display = '\n'.join(lines[:8]) if lines else self.host.tr('(empty response)')
             self.host.set_var('output_lines', display)
             return {'status': 'done'}
         else:
-            msg = 'PM3 not connected or no response'
+            msg = self.host.tr('PM3 not connected or no response')
             if output:
                 msg = output
             self.host.set_var('error_msg', msg)

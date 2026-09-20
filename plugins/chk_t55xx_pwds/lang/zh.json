@@ -1,0 +1,21 @@
+{
+    "Chk T55xx Pwds": "T55xx密码检测",
+    "Place T55xx tag on reader": "将T55xx放到读卡器上",
+    "Press OK or Start": "按 OK 或开始",
+    "Password found:": "找到密码:",
+    "Wipe tag with this password?": "用此密码擦除卡片？",
+    "Wipe": "擦除",
+    "Wipe complete!": "擦除完成！",
+    "Password was:": "密码为:",
+    "No password found": "未找到密码",
+    "Press OK to retry": "按 OK 重试",
+    "Starting...": "启动中...",
+    "Dictionary loaded...": "字典已加载...",
+    "Checking passwords...": "检测密码中...",
+    "Parsing results...": "解析结果中...",
+    "Wiping tag...": "擦除中...",
+    "No password stored": "未存储密码",
+    "Wipe failed": "擦除失败",
+    "Import error": "导入错误",
+    "Copy error": "复制错误"
+}
