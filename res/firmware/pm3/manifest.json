@@ -1,7 +1,7 @@
 {
-    "pm3_firmware_version": "v4.21611",
-    "pm3_firmware_sha256": "9f0a9cfb68e12f7e9bfacaea39abbc994f6c3e2bc59e777300938445efb5958e",
-    "pm3_client_version": "v4.21611",
+    "pm3_firmware_version": "v4.23346",
+    "pm3_firmware_sha256": "bfad1993ad64b1fd56de60f8a5d4a03ca0b1f2791e558d161dacdd2a45c56141",
+    "pm3_client_version": "v4.23346",
     "build_platform": "PM3ICOPYX",
-    "build_date": "2026-08-31T02:37:18Z"
+    "build_date": "2026-09-20T12:59:28Z"
 }
