@@ -15,9 +15,11 @@
 
 """Chameleon Dump -- move iCopy-X dumps to/from a Chameleon.
 
-Auto-detects a **Chameleon Ultra** or a **ChameleonMini / Tiny** on the
-iCopy-X USB host port and dispatches to the matching backend
-(``ultra_backend`` / ``tiny_backend``).  Both directions are supported:
+Auto-detects a **Chameleon Ultra** or a **Chameleon Tiny** on the iCopy-X
+USB host port and dispatches to the matching backend (``ultra_backend`` /
+``tiny_backend``).  The Tiny backend speaks the ChameleonMini command set,
+so a **Chameleon Mini** should work too -- untested (no hardware to
+verify).  Both directions are supported:
 
     Write   load an iCopy-X dump into a Chameleon slot
     Read    save a Chameleon slot back out as an iCopy-X dump

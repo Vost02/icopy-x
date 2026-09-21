@@ -13,7 +13,7 @@
 # This entire header "Required Notice" must remain in place.
 ##########################################################################
 
-"""Ultra Writer -- move MIFARE/NTAG/EM410x cards both ways with a Chameleon Ultra.
+"""Chameleon Ultra backend for the Chameleon Dump plugin.
 
 Write: load an iCopy-X dump into a Chameleon Ultra slot.
 Read:  save a Chameleon Ultra slot back out as an iCopy-X dump.
@@ -32,7 +32,7 @@ Slots are 0..7 on the wire; the UI shows them as "Slot 1".."Slot 8".
 The slot is left as a standard card (no gen1a/use-block0).
 
 Reading enumerates the slots with ``GET_SLOT_INFO`` (1019) and saves the
-emulator memory through ``lib.card_dump`` (see that module for the file
+emulator memory through ``dump_writer`` (see that module for the file
 layout).
 """
 

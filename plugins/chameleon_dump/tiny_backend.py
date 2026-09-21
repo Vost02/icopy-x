@@ -1,12 +1,13 @@
-"""Tiny Writer -- move MIFARE/NTAG cards both ways with a ChameleonMini / Tiny.
+"""Chameleon Tiny backend for the Chameleon Dump plugin.
 
-Write: load an iCopy-X dump into a ChameleonMini/Tiny slot.
-Read:  save a ChameleonMini/Tiny slot back out as an iCopy-X dump.
+Write: load an iCopy-X dump into a Chameleon Tiny slot.
+Read:  save a Chameleon Tiny slot back out as an iCopy-X dump.
 
-The ChameleonMini / Tiny (proxgrind firmware, 2023 CI build or later) is
-expected on the iCopy-X USB host port and appears as a USB CDC serial device.
-Unlike the Chameleon Ultra, it uses a text command line (VERSION?, SETTING=,
-CONFIG=, UIDMODE=, SAKMODE=, ...) plus XModem for UPLOAD/DOWNLOAD.
+The Chameleon Tiny (proxgrind firmware, 2023 CI build or later) is expected
+on the iCopy-X USB host port and appears as a USB CDC serial device.  It
+uses the ChameleonMini text command set (VERSION?, SETTING=, CONFIG=,
+UIDMODE=, SAKMODE=, ...) plus XModem for UPLOAD/DOWNLOAD, so a Chameleon
+Mini should work too -- untested (no hardware to verify).
 
 Supported dump families (recognized by the iCopy-X filename convention):
     mf1     M1-<1K|4K|Mini>-<4B|7B>_<uid>_<n>.bin   -> MF_CLASSIC_1K[_7B] / 4K[_7B] / MINI_4B
