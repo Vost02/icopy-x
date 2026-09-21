@@ -1,0 +1,16 @@
+{
+    "Paxton Block Reader": "Paxton块读取",
+    "Place Paxton Tag on the reader and press \"Read\" to begin.": "将 Paxton 卡放到读卡器上，按\"读取\"开始。",
+    "Type:  {pax_type}": "类型:  {pax_type}",
+    "UID:   {uid}": "UID:   {uid}",
+    "Press Next to View Blocks": "按下一步查看块",
+    "Is it a Paxton tag?": "这是Paxton卡吗？",
+    "Starting...": "启动中...",
+    "Reading blocks...": "读取块中...",
+    "Parsing results...": "解析结果中...",
+    "Not a Paxton tag": "非Paxton卡",
+    "Read failed": "读取失败",
+    "Parse failed": "解析失败",
+    "Import error": "导入错误",
+    "Unknown Paxton type": "未知Paxton类型"
+}

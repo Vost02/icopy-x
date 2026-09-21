@@ -102,6 +102,7 @@ class PluginActivity(BaseActivity):
         self._plugin_dir = None
         self._manifest = {}
         self._ui_def = None
+        self._translations = {}
         self._plugin_instance = None
         self._renderer = None
         self._state = {}              # variable state for {placeholder} resolution
@@ -135,14 +136,16 @@ class PluginActivity(BaseActivity):
         self._ui_def = bundle.get('ui_definition')
         self._entry_class = bundle.get('entry_class')
         self._permissions = self._manifest.get('permissions', [])
+        self._translations = bundle.get('translations') or {}
 
-        plugin_name = self._manifest.get('name', 'Plugin')
+        plugin_name = self.tr(self._manifest.get('name', 'Plugin'))
 
         # Set up the renderer on our canvas
         canvas = self.getCanvas()
         if canvas is not None:
             self._renderer = JsonRenderer(canvas)
             self._renderer.set_state(self._state)
+            self._renderer.set_translator(self.tr)
 
         # If entry_class is a BaseActivity subclass with no ui.json,
         # delegate entirely: launch it as a child activity.
@@ -436,7 +439,7 @@ class PluginActivity(BaseActivity):
             if label:
                 canvas.create_text(
                     SCREEN_W // 2, CONTENT_Y0 + 20,
-                    text=label, fill='#000000',
+                    text=self.tr(label), fill='#000000',
                     font=resources.get_font(13),
                     anchor='center', tags='_jr_content',
                 )
@@ -446,26 +449,28 @@ class PluginActivity(BaseActivity):
             )
             self._input_widget.show()
         else:
-            self._renderer.render(screen)
+            # Content only.  The button bar is owned by the framework
+            # (setLeftButton/setRightButton below) so that the M1/M2
+            # visible/active flags checked by callKeyEvent, long-label
+            # fitting and dismiss/disable all stay in sync with what is
+            # on screen.  Handing the buttons to the renderer as well
+            # drew every label twice (issue #22).
+            self._renderer.render(dict(screen, buttons={}))
 
-        # Handle buttons for M1/M2 active state
+        # Buttons: a plain string or {"text": ..., "active": bool}.
+        # Drawn once, through the framework, which also sets the
+        # M1/M2 visible/active flags that gate key dispatch.
         buttons = screen.get('buttons', {})
         left_btn = buttons.get('left')
         right_btn = buttons.get('right')
         if left_btn:
-            resolved = self._renderer.resolve(
-                left_btn if isinstance(left_btn, str)
-                else left_btn.get('text', '')
-            )
-            self.setLeftButton(resolved)
+            text, active = self._renderer.parse_button(left_btn)
+            self.setLeftButton(self._renderer.resolve(text), active=active)
         else:
             self.dismissButton(left=True)
         if right_btn:
-            resolved = self._renderer.resolve(
-                right_btn if isinstance(right_btn, str)
-                else right_btn.get('text', '')
-            )
-            self.setRightButton(resolved)
+            text, active = self._renderer.parse_button(right_btn)
+            self.setRightButton(self._renderer.resolve(text), active=active)
         else:
             self.dismissButton(right=True)
 
@@ -811,6 +816,21 @@ class PluginActivity(BaseActivity):
             logger.error("shell_command error: %s", traceback.format_exc())
             return (-1, '', str(exc))
 
+    def tr(self, text):
+        """Translate an English display string into the active language.
+
+        Looks in the plugin's own packs (plugins/<name>/lang/<code>.json)
+        first, then in the core language pack, and returns the text
+        unchanged when neither knows it.  Static ui.json text, the
+        manifest name, toasts and string values stored with set_var()
+        are translated automatically; call this yourself only for a
+        string you build at runtime, on the template, before formatting:
+
+            self.host.set_var('error_msg',
+                              self.host.tr('Clone failed: %s') % detail)
+        """
+        return resources.tr_plugin(text, self._translations)
+
     def set_var(self, key, value):
         """Set a variable for {placeholder} resolution in screen templates.
 
@@ -855,6 +875,8 @@ class PluginActivity(BaseActivity):
             timeout: Auto-dismiss in milliseconds (0 = persistent).
             icon: Icon name ('check', 'error', 'warning', 'info', or None).
         """
+        text = self.tr(text)
+
         def _show():
             self._ensure_toast()
             try:

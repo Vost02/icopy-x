@@ -29,6 +29,7 @@ Each plugin lives in its own subdirectory of the project-level plugins/ director
         manifest.json      # REQUIRED — plugin metadata
         plugin.py          # REQUIRED — code entry point
         ui.json            # OPTIONAL — JSON UI screens
+        lang/<code>.json   # OPTIONAL — translations keyed by English text
         app_icon.png       # OPTIONAL — 20x20 menu icon
 
 The loader validates manifest.json fields, optionally lints ui.json,
@@ -86,7 +87,7 @@ class PluginInfo:
         'plugin_dir', 'promoted', 'canvas_mode', 'fullscreen',
         'order', 'permissions', 'icon_path', 'entry_class_name',
         'activity_class', 'manifest', 'ui_definition',
-        'key_map', 'binary', 'args',
+        'key_map', 'binary', 'args', 'translations',
     )
 
     def __init__(self, **kwargs):
@@ -434,6 +435,52 @@ def _resolve_icon_path(plugin_dir, manifest):
     return None
 
 
+def load_translations(plugin_dir):
+    """Load a plugin's translation packs from ``<plugin_dir>/lang/``.
+
+    Each ``lang/<code>.json`` is a flat JSON object keyed by the exact
+    English string the plugin shows, mapping to its translation (see
+    tools/plugin_i18n.py, which generates the ``en.json`` template).
+    Keys starting with ``_`` are metadata and ignored, as are entries
+    whose value is not a non-empty string.  ``en.json`` is the source
+    text and is not loaded.
+
+    Returns:
+        dict ``{code: {english: translation}}``.  A missing ``lang/``
+        directory yields ``{}``; an unreadable or malformed file is
+        logged and skipped so a bad translation never disables a plugin.
+    """
+    packs = {}
+    lang_dir = os.path.join(plugin_dir, 'lang')
+    if not os.path.isdir(lang_dir):
+        return packs
+    dirname = os.path.basename(plugin_dir)
+    for fn in sorted(os.listdir(lang_dir)):
+        if not fn.endswith('.json'):
+            continue
+        code = fn[:-len('.json')]
+        if code == 'en':
+            continue
+        path = os.path.join(lang_dir, fn)
+        try:
+            with open(path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+        except (OSError, ValueError) as exc:
+            logger.warning('Plugin %s: lang/%s unreadable: %s — skipped',
+                           dirname, fn, exc)
+            continue
+        if not isinstance(data, dict):
+            logger.warning('Plugin %s: lang/%s must be a JSON object — skipped',
+                           dirname, fn)
+            continue
+        packs[code] = {
+            k: v for k, v in data.items()
+            if isinstance(k, str) and not k.startswith('_')
+            and isinstance(v, str) and v
+        }
+    return packs
+
+
 def _load_single_plugin(plugin_dir):
     """Attempt to load a single plugin from its directory.
 
@@ -520,6 +567,9 @@ def _load_single_plugin(plugin_dir):
     # --- Icon ---
     icon_path = _resolve_icon_path(plugin_dir, manifest)
 
+    # --- Translations (optional) ---
+    translations = load_translations(plugin_dir)
+
     return PluginInfo(
         name=name,
         version=version,
@@ -540,6 +590,7 @@ def _load_single_plugin(plugin_dir):
         key_map=key_map,
         binary=binary,
         args=args,
+        translations=translations,
     )
 
 

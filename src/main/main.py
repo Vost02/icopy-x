@@ -202,6 +202,16 @@ def main():
     except Exception as e:
         print('[main] WARNING: HMI start failed: %s' % e, flush=True)
 
+    # ── 5b. Sync system clock from the GD32 RTC (best-effort) ──────
+    # The GD32 keeps the real-time clock; Linux otherwise starts at a
+    # fixed fake date.  Logic lives in lib/rtc_sync.py; the import is
+    # guarded so even a broken module cannot stop the app from booting.
+    try:
+        import rtc_sync
+        rtc_sync.start()
+    except Exception:
+        pass
+
     # ── 6. Launch UI (blocks in mainloop) ──────────────────────────
     import application
     application.startApp()

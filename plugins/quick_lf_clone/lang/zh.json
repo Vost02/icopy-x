@@ -1,0 +1,18 @@
+{
+    "Quick LF Clone": "快速LF克隆",
+    "Place source tag on reader": "将源卡放到读卡器上",
+    "Press OK to scan": "按 OK 扫描",
+    "Found: {tag_type}": "已找到: {tag_type}",
+    "ID: {tag_id}": "ID: {tag_id}",
+    "Place blank T55xx, press OK": "放置空白T55xx，按 OK",
+    "Clone successful!": "克隆成功！",
+    "Press OK to restart": "按 OK 重新开始",
+    "Press OK to retry": "按 OK 重试",
+    "No tag detected": "未检测到卡片",
+    "Could not identify tag": "无法识别卡片",
+    "No tag data available": "无可用卡片数据",
+    "Clone failed: no response": "克隆失败: 无响应",
+    "Clone failed: %s": "克隆失败: %s",
+    "Clone not supported for %s": "不支持克隆 %s",
+    "unknown error": "未知错误"
+}

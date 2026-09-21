@@ -283,7 +283,7 @@ class LFClonePwdPlugin(object):
             return {'status': 'error'}
 
         if not _is_writable(typ):
-            self.host.set_var('error_msg', '%s\nnot writable' % _get_tag_name(typ))
+            self.host.set_var('error_msg', self.host.tr('%s\nnot writable') % _get_tag_name(typ))
             return {'status': 'error'}
 
         tag_name = _get_tag_name(typ)
@@ -506,9 +506,9 @@ class LFClonePwdPlugin(object):
             return {'status': 'error'}
 
         if b0_match.group(1).upper() != expected_b0.upper():
-            self.host.set_var('error_msg', 'B0 mismatch\n%s' % b0_match.group(1))
+            self.host.set_var('error_msg', self.host.tr('B0 mismatch\n%s') % b0_match.group(1))
             return {'status': 'error'}
 
         self.host.set_progress(_PWD_PROG_DONE, 'Done')
-        self.host.set_var('done_msg', 'Written & pwd set\n%s' % pwd)
+        self.host.set_var('done_msg', self.host.tr('Written & pwd set\n%s') % pwd)
         return {'status': 'done'}

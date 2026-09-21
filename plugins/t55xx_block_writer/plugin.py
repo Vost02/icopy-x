@@ -262,7 +262,7 @@ class T55xxBlockWriterPlugin(object):
         pg1 = ' --pg1' if page == 1 else ''
 
         # Step 1 -- write (blind; no tag ACK)
-        self.host.set_progress(_PROG_WRITE, 'Writing block %s...' % block)
+        self.host.set_progress(_PROG_WRITE, self.host.tr('Writing block %s...') % block)
         cmd = 'lf t55xx write -b %s%s -d %s' % (block, pg1, data)
         if pwd:
             cmd += ' -p %s' % pwd

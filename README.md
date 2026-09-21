@@ -200,6 +200,20 @@ A good way to tell if the update worked is if your battery indicator is coloured
 The plugins are designed as examples for developers : how to use the JSON UI framework, how to send commands to the proxmark, how to chain screens, etc.
 Try DOOM for a "working" plugin.
 
+## Translating plugins
+
+Plugins are written in English. To show a plugin in another language, ship a translation pack next to it: `plugins/<name>/lang/<code>.json`, a flat JSON object mapping each English string the plugin shows to its translation. `<code>` matches a core language file in `data/lang/` (`fr`, `zh`, ...). Anything a pack does not cover falls back to the core pack (common labels such as "Back" or "Again" need no per-plugin entry) and then to English.
+
+```
+python tools/plugin_i18n.py extract my_plugin          # writes lang/en.json: every string the plugin shows
+python tools/plugin_i18n.py fill my_plugin --lang fr   # scaffolds lang/fr.json with empty values to translate
+python tools/plugin_i18n.py check my_plugin            # verifies coverage and placeholders
+```
+
+ - Keys are the exact English text from `manifest.json` (`name`), `ui.json` and the literals handed to `host.set_var()`, `host.show_toast()` and `host.set_progress()`. Keep `{placeholders}` and `%s` markers verbatim in the translation; text is translated before they are filled in.
+ - A string built at runtime must go through `self.host.tr('template %s') % value`, so the template can be looked up before formatting.
+ - The bundled plugins ship French and Chinese packs; `tools/plugin_i18n.py check --require` is the CI contract that keeps them complete.
+
 ## Companion PM3 Clients (for PC-Mode)
 
 When your iCopy-X is in "PC-Mode", you can connect to your iCopy-X's Proxmark module directly from your computer.

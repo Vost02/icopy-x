@@ -1,0 +1,19 @@
+{
+    "T55xx Wipe": "Effacer T55xx",
+    "Place T55xx on reader": "Placez T55xx sur le lecteur",
+    "Wipe with password?": "Effacer avec mot de passe ?",
+    "No Pwd": "Sans mdp",
+    "With Pwd": "Avec mdp",
+    "Current password": "Mot de passe actuel",
+    "Wipe": "Effacer",
+    "Wipe complete!": "Effacement réussi !",
+    "Press OK to retry": "Appuyez sur OK pour réessayer",
+    "Starting...": "Démarrage...",
+    "Wiping T55xx...": "Effacement T55xx...",
+    "T55xx wiped cleanly": "T55xx effacé proprement",
+    "Wipe failed": "Échec de l'effacement",
+    "Detect after wipe failed": "Échec détection après effac.",
+    "Need 8 hex chars": "8 caractères hex requis",
+    "No password stored": "Aucun mot de passe stocké",
+    "Import error": "Erreur d'importation"
+}

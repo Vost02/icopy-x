@@ -1,0 +1,16 @@
+{
+    "Paxton Block Reader": "Lecteur bloc Paxton",
+    "Place Paxton Tag on the reader and press \"Read\" to begin.": "Placez le tag Paxton sur le lecteur et appuyez sur \"Lire\" pour commencer.",
+    "Type:  {pax_type}": "Type:  {pax_type}",
+    "UID:   {uid}": "UID:   {uid}",
+    "Press Next to View Blocks": "Suivant pour voir les blocs",
+    "Is it a Paxton tag?": "Est-ce un tag Paxton ?",
+    "Starting...": "Démarrage...",
+    "Reading blocks...": "Lecture des blocs...",
+    "Parsing results...": "Analyse des résultats...",
+    "Not a Paxton tag": "Pas un tag Paxton",
+    "Read failed": "Échec de la lecture",
+    "Parse failed": "Échec de l'analyse",
+    "Import error": "Erreur d'importation",
+    "Unknown Paxton type": "Type Paxton inconnu"
+}

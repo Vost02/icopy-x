@@ -72,6 +72,8 @@ class PluginsMenuActivity(BaseActivity):
         super().__init__(bundle)
         self._plugins = []
         self.lv_plugins = None
+        # Language the cached list labels were built for (see onResume).
+        self._labels_lang = None
 
     def onCreate(self, bundle=None):
         """Set up the plugins submenu.
@@ -106,8 +108,8 @@ class PluginsMenuActivity(BaseActivity):
             self.lv_plugins = ListView(
                 canvas, xy=xy, text_size=text_size, item_height=LIST_ITEM_H,
             )
-            labels = [p.name for p in self._plugins]
-            self.lv_plugins.setItems(labels)
+            self.lv_plugins.setItems(self._labels())
+            self._labels_lang = resources.getLanguage()
             icons = [p.icon_path or 'plugin' for p in self._plugins]
             self.lv_plugins.setIcons(icons)
             self.lv_plugins.setOnPageChangeCall(self._onPageChange)
@@ -119,8 +121,16 @@ class PluginsMenuActivity(BaseActivity):
     def onResume(self):
         """Refresh battery, restore list display and title."""
         super().onResume()
-        if self.lv_plugins is not None and not self.lv_plugins.isShowing():
-            self.lv_plugins.show()
+        if self.lv_plugins is not None:
+            # Labels are cached in the ListView; rebuild them when the
+            # language changed while away, keeping the highlighted row.
+            if resources.getLanguage() != self._labels_lang:
+                selected = self.lv_plugins.selection()
+                self.lv_plugins.setItems(self._labels())
+                self.lv_plugins.setSelection(selected)
+                self._labels_lang = resources.getLanguage()
+            if not self.lv_plugins.isShowing():
+                self.lv_plugins.show()
         self._updateTitle()
 
     def onKeyEvent(self, key):
@@ -185,8 +195,16 @@ class PluginsMenuActivity(BaseActivity):
                 'ui_definition': info.ui_definition,
                 'entry_class': info.activity_class,
                 'plugin_key': info.key,
+                'translations': getattr(info, 'translations', None),
             }
             actstack.start_activity(PluginActivity, bundle)
+
+    def _labels(self):
+        """Plugin names in the active language (each plugin's own pack)."""
+        return [
+            resources.tr_plugin(p.name, getattr(p, 'translations', None))
+            for p in self._plugins
+        ]
 
     def _onPageChange(self, page):
         """Callback from ListView when page changes."""
@@ -194,7 +212,7 @@ class PluginsMenuActivity(BaseActivity):
 
     def _updateTitle(self):
         """Update title: "Plugins N/M"."""
-        base_title = "Plugins"
+        base_title = resources.get_str('plugins')
         if self.lv_plugins is not None:
             total = self.lv_plugins.getPageCount()
             current = self.lv_plugins.getPagePosition() + 1
