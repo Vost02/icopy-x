@@ -15,10 +15,10 @@
 
 """Save a Chameleon emulator slot as an iCopy-X dump.
 
-Shared by the Ultra/Tiny writer plugins for their "read Chameleon slot ->
-dump" feature.  Produces files that match the iCopy-X filename convention
+Used by the Chameleon Dump plugin's read flow (both the Ultra and Tiny
+backends).  Produces files that match the iCopy-X filename convention
 (``src/middleware/appfiles.py``) so the built-in Dump Files browser, the
-two writer plugins and card_notes all recognise them:
+write flow and card_notes all recognise them:
 
     mf1     M1-<1K|4K|Plus-2K|Mini>-<4B|7B>_<uid>_<n>.bin  (+ .json)
     mfu     NTAG213|NTAG215|NTAG216_<uid>_<n>.bin           (+ .json)

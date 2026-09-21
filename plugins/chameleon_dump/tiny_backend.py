@@ -430,15 +430,30 @@ def _note_for(store, family, name):
     return store.lookup(family, uid)
 
 
-# Shared dump writer (lib.card_dump), used by the read-to-dump flow.
-# Imported lazily (like the notes store) so a missing module only
+# Dump writer (dump_writer.py, next to this file) used by the read-to-dump
+# flow.  Loaded lazily via importlib so it works whether the plugin was
+# imported through the loader or directly, and so a missing module only
 # disables reading, never the write path.
+_CARD_DUMP = None
+_CARD_DUMP_TRIED = False
+
+
 def _load_card_dump():
-    try:
-        from lib import card_dump
-    except Exception:
-        return None
-    return card_dump
+    global _CARD_DUMP, _CARD_DUMP_TRIED
+    if not _CARD_DUMP_TRIED:
+        _CARD_DUMP_TRIED = True
+        try:
+            import importlib.util
+            path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                'dump_writer.py')
+            spec = importlib.util.spec_from_file_location(
+                'chameleon_dump_dump_writer', path)
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            _CARD_DUMP = module
+        except Exception:
+            _CARD_DUMP = None
+    return _CARD_DUMP
 
 
 def _uid_used(uid):

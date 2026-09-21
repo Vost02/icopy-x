@@ -1,11 +1,23 @@
-"""lib.card_dump -- iCopy-X dump naming and writers."""
+"""Chameleon Dump plugin: iCopy-X dump naming and writers (dump_writer)."""
 
+import importlib.util
 import json
 import os
 
 import pytest
 
-from lib import card_dump
+REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+
+def _load_dump_writer():
+    path = os.path.join(REPO, 'plugins', 'chameleon_dump', 'dump_writer.py')
+    spec = importlib.util.spec_from_file_location('dump_writer_test', path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+card_dump = _load_dump_writer()
 
 
 def _uid_pages(uid_hex):
