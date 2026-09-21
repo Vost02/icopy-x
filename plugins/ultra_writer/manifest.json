@@ -1,6 +1,6 @@
 {
     "name": "Ultra Writer",
-    "version": "1.1.2",
+    "version": "1.2.0",
     "author": "Vost02",
     "description": "Write an iCopy-X dump (MIFARE Classic / NTAG / EM410x) into a Chameleon Ultra slot over USB with readback verification",
     "entry_class": "UltraWriterPlugin",

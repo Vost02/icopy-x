@@ -451,6 +451,10 @@ class TinyWriterPlugin(object):
         if self.host is not None:
             self.host.set_progress(value, message)
 
+    def tr(self, text):
+        translator = getattr(self.host, "tr", None)
+        return translator(text) if translator is not None else text
+
     def _selected_index(self, state_id):
         list_state = getattr(self.host, "_list_state", None) or {}
         entry = list_state.get(state_id) or {}
@@ -493,15 +497,16 @@ class TinyWriterPlugin(object):
         try:
             dumps = _scan_dumps()
         except Exception as exc:
-            self._set("error_msg", "Dump scan failed:\n%s" % exc)
+            self._set("error_msg", self.tr("Dump scan failed:\n%s") % exc)
             return {"status": "error"}
 
         if not dumps:
             self._set(
                 "error_msg",
-                "No supported dump found.\n\nLooked for iCopy-X dumps:\n"
-                "M1-1K/4K/Mini-4B/7B_...\nNTAG213/215/216_...\n"
-                "in /mnt/upan/dump/")
+                self.tr(
+                    "No supported dump found.\n\nLooked for iCopy-X dumps:\n"
+                    "M1-1K/4K/Mini-4B/7B_...\nNTAG213/215/216_...\n"
+                    "in /mnt/upan/dump/"))
             return {"status": "error"}
 
         self._dumps = dumps
@@ -516,7 +521,7 @@ class TinyWriterPlugin(object):
         try:
             tiny, port, version = _find_tiny()
         except Exception as exc:
-            self._set("error_msg", "Chameleon Mini/Tiny not found.\n\n%s" % exc)
+            self._set("error_msg", self.tr("Chameleon Mini/Tiny not found.\n\n%s") % exc)
             return {"status": "error"}
 
         self._tiny = tiny
@@ -527,40 +532,40 @@ class TinyWriterPlugin(object):
     def choose_dump(self):
         idx = self._selected_index("select_dump")
         if idx < 0 or idx >= len(self._dumps):
-            self._set("error_msg", "Dump selection out of range")
+            self._set("error_msg", self.tr("Dump selection out of range"))
             return {"status": "error"}
         entry = self._dumps[idx]
         try:
             data = _read_dump(entry["path"], entry["meta"])
         except Exception as exc:
-            self._set("error_msg", "Cannot read dump:\n%s" % exc)
+            self._set("error_msg", self.tr("Cannot read dump:\n%s") % exc)
             return {"status": "error"}
         entry["data"] = data
         self._entry = entry
         meta = entry["meta"]
         self._set("dump_name", entry["name"])
         self._set("dump_uid", entry["uid"])
-        self._set("card_type", "%s, UID %dB" % (meta["type_name"], meta["uidlen"]))
+        self._set("card_type", self.tr("%s, UID %dB") % (meta["type_name"], meta["uidlen"]))
         return {"status": "ready"}
 
     def choose_slot(self):
         idx = self._selected_index("select_slot")
         if idx < 0 or idx > 7:
-            self._set("error_msg", "Invalid slot")
+            self._set("error_msg", self.tr("Invalid slot"))
             return {"status": "error"}
         self._slot = idx + 1
-        self._set("slot_text", "Slot %d" % (idx + 1))
+        self._set("slot_text", self.tr("Slot %d") % (idx + 1))
         return {"status": "ready"}
 
     def do_write(self):
         try:
             return self._do_write()
         except TinyCommandError as exc:
-            self._set("result_title", "Write Failed")
+            self._set("result_title", self.tr("Write Failed"))
             self._set("result_detail", str(exc))
             return {"status": "fail"}
         except Exception as exc:
-            self._set("result_title", "Write Failed")
+            self._set("result_title", self.tr("Write Failed"))
             self._set("result_detail", "%s: %s" % (type(exc).__name__, exc))
             return {"status": "fail"}
 
@@ -575,34 +580,35 @@ class TinyWriterPlugin(object):
 
         tiny = self._tiny
         if tiny is None:
-            self._progress(2, "Connecting")
+            self._progress(2, self.tr("Connecting"))
             tiny, port, version = _find_tiny()
             self._tiny = tiny
             self._port = port
 
-        self._progress(4, "SETTING=%d" % slot)
+        self._progress(4, self.tr("SETTING=%d") % slot)
         tiny.expect_ok("SETTING=%d" % slot, step="select slot")
-        self._progress(8, "CONFIG=%s" % meta["config"])
+        self._progress(8, self.tr("CONFIG=%s") % meta["config"])
         tiny.expect_ok("CONFIG=%s" % meta["config"], step="set config")
         if kind == "mf1":
-            self._progress(12, "UIDMODE=0")
+            self._progress(12, self.tr("UIDMODE=0"))
             tiny.expect_ok("UIDMODE=0", step="standard card")
             if meta["config"] in SAKMODE_CONFIGS:
-                self._progress(14, "SAKMODE=1")
+                self._progress(14, self.tr("SAKMODE=1"))
                 tiny.expect_ok("SAKMODE=1", step="SAK/ATQA from block 0")
-        self._progress(16, "CLEAR")
+        self._progress(16, self.tr("CLEAR"))
         tiny.expect_ok("CLEAR", step="clear slot")
 
         def on_up(off, total):
-            self._progress(16 + int(60 * off / max(total, 1)), "Writing %d/%d" % (off, total))
+            self._progress(16 + int(60 * off / max(total, 1)),
+                           self.tr("Writing %d/%d") % (off, total))
 
         tiny.upload(data, on_progress=on_up)
 
-        self._progress(80, "STORE")
+        self._progress(80, self.tr("STORE"))
         tiny.expect_ok("STORE", step="store to flash", timeout=STORE_TIMEOUT)
         time.sleep(0.2)
 
-        self._progress(86, "Verify")
+        self._progress(86, self.tr("Verify"))
         back = tiny.download()
         memsize = meta["memsize"]
         if bytes(back[:memsize]) != bytes(data[:memsize]):
@@ -612,19 +618,19 @@ class TinyWriterPlugin(object):
                      if first is not None else "length")
             raise TinyError("verify mismatch at %s" % where)
 
-        self._progress(96, "Readback OK")
+        self._progress(96, self.tr("Readback OK"))
         cfg = tiny.value("CONFIG?")
         uid = tiny.value("UID?")
-        self._progress(100, "Done")
+        self._progress(100, self.tr("Done"))
 
-        self._set("result_title", "Success")
+        self._set("result_title", self.tr("Success"))
         self._set("result_detail", "\n".join([
-            "%s -> %s" % (meta["type_name"], self._slot_text()),
-            "DOWNLOAD %d B identical" % memsize,
-            "CONFIG %s" % cfg,
-            "UID %s" % uid,
+            self.tr("%s -> %s") % (meta["type_name"], self._slot_text()),
+            self.tr("DOWNLOAD %d B identical") % memsize,
+            self.tr("CONFIG %s") % cfg,
+            self.tr("UID %s") % uid,
         ]))
         return {"status": "ok"}
 
     def _slot_text(self):
-        return "Slot %d" % self._slot
+        return self.tr("Slot %d") % self._slot

@@ -517,6 +517,10 @@ class UltraWriterPlugin(object):
         if self.host is not None:
             self.host.set_progress(value, message)
 
+    def tr(self, text):
+        translator = getattr(self.host, "tr", None)
+        return translator(text) if translator is not None else text
+
     def _selected_index(self, state_id):
         list_state = getattr(self.host, "_list_state", None) or {}
         entry = list_state.get(state_id) or {}
@@ -559,15 +563,16 @@ class UltraWriterPlugin(object):
         try:
             dumps = _scan_dumps()
         except Exception as exc:
-            self._set("error_msg", "Dump scan failed:\n%s" % exc)
+            self._set("error_msg", self.tr("Dump scan failed:\n%s") % exc)
             return {"status": "error"}
 
         if not dumps:
             self._set(
                 "error_msg",
-                "No supported dump found.\n\nLooked for iCopy-X dumps:\n"
-                "M1-...   NTAG213/215/216_...\nEM410x-ID_...\n"
-                "in /mnt/upan/dump/")
+                self.tr(
+                    "No supported dump found.\n\nLooked for iCopy-X dumps:\n"
+                    "M1-...   NTAG213/215/216_...\nEM410x-ID_...\n"
+                    "in /mnt/upan/dump/"))
             return {"status": "error"}
 
         self._dumps = dumps
@@ -582,7 +587,7 @@ class UltraWriterPlugin(object):
         try:
             ultra, port, version = _find_ultra()
         except Exception as exc:
-            self._set("error_msg", "Chameleon Ultra not found.\n\n%s" % exc)
+            self._set("error_msg", self.tr("Chameleon Ultra not found.\n\n%s") % exc)
             return {"status": "error"}
 
         self._ultra = ultra
@@ -593,13 +598,13 @@ class UltraWriterPlugin(object):
     def choose_dump(self):
         idx = self._selected_index("select_dump")
         if idx < 0 or idx >= len(self._dumps):
-            self._set("error_msg", "Dump selection out of range")
+            self._set("error_msg", self.tr("Dump selection out of range"))
             return {"status": "error"}
         entry = self._dumps[idx]
         try:
             data, extra = _read_dump(entry["path"], entry["meta"])
         except Exception as exc:
-            self._set("error_msg", "Cannot read dump:\n%s" % exc)
+            self._set("error_msg", self.tr("Cannot read dump:\n%s") % exc)
             return {"status": "error"}
         entry["data"] = data
         entry["extra"] = extra
@@ -608,27 +613,27 @@ class UltraWriterPlugin(object):
         uidlen = meta.get("uidlen", len(_uid_of(data, meta)))
         self._set("dump_name", entry["name"])
         self._set("dump_uid", entry["uid"])
-        self._set("card_type", "%s, UID %dB" % (meta["type_name"], uidlen))
+        self._set("card_type", self.tr("%s, UID %dB") % (meta["type_name"], uidlen))
         return {"status": "ready"}
 
     def choose_slot(self):
         idx = self._selected_index("select_slot")
         if idx < 0 or idx > 7:
-            self._set("error_msg", "Invalid slot")
+            self._set("error_msg", self.tr("Invalid slot"))
             return {"status": "error"}
         self._slot = idx
-        self._set("slot_text", "Slot %d" % (idx + 1))
+        self._set("slot_text", self.tr("Slot %d") % (idx + 1))
         return {"status": "ready"}
 
     def do_write(self):
         try:
             return self._do_write()
         except UltraCommandError as exc:
-            self._set("result_title", "Write Failed")
+            self._set("result_title", self.tr("Write Failed"))
             self._set("result_detail", str(exc))
             return {"status": "fail"}
         except Exception as exc:
-            self._set("result_title", "Write Failed")
+            self._set("result_title", self.tr("Write Failed"))
             self._set("result_detail", "%s: %s" % (type(exc).__name__, exc))
             return {"status": "fail"}
 
@@ -644,7 +649,7 @@ class UltraWriterPlugin(object):
 
         ultra = self._ultra
         if ultra is None:
-            self._progress(2, "Connecting")
+            self._progress(2, self.tr("Connecting"))
             ultra, port, version = _find_ultra()
             self._ultra = ultra
             self._port = port
@@ -653,16 +658,16 @@ class UltraWriterPlugin(object):
             self._progress(pct, label)
             return ultra.send(cmd, payload, timeout=CMD_TIMEOUT, step=label)
 
-        do(CMD_SET_ACTIVE_SLOT, bytes([slot]), "1003 set active slot", 4)
+        do(CMD_SET_ACTIVE_SLOT, bytes([slot]), self.tr("1003 set active slot"), 4)
         do(CMD_SET_SLOT_TAG_TYPE, struct.pack(">BH", slot, meta["tag_type"]),
-           "1004 set tag type", 8)
+           self.tr("1004 set tag type"), 8)
         do(CMD_SET_SLOT_DATA_DEFAULT, struct.pack(">BH", slot, meta["tag_type"]),
-           "1005 init slot", 12)
+           self.tr("1005 init slot"), 12)
 
         if kind == "mfu":
             # Ask the emulator how many pages this tag type has and only write
             # what both the dump and the slot can hold.
-            resp = do(CMD_MF0_NTAG_GET_PAGE_COUNT, b"", "4030 page count", 14)
+            resp = do(CMD_MF0_NTAG_GET_PAGE_COUNT, b"", self.tr("4030 page count"), 14)
             avail = resp[0] if resp else 0
             pages = len(data) // PAGE_SIZE
             if avail:
@@ -677,16 +682,16 @@ class UltraWriterPlugin(object):
         else:
             lines, sense = self._write_em410x(do, data, meta, slot)
 
-        do(CMD_SET_SLOT_ENABLE, bytes([slot, sense, 1]), "1006 enable slot", 90)
-        do(CMD_SLOT_DATA_CONFIG_SAVE, b"", "1009 store to flash", 94)
+        do(CMD_SET_SLOT_ENABLE, bytes([slot, sense, 1]), self.tr("1006 enable slot"), 90)
+        do(CMD_SLOT_DATA_CONFIG_SAVE, b"", self.tr("1009 store to flash"), 94)
         time.sleep(0.2)
 
         detail = self._verify(do, data, meta, slotsense=sense)
-        self._progress(100, "Done")
+        self._progress(100, self.tr("Done"))
 
-        self._set("result_title", "Success")
+        self._set("result_title", self.tr("Success"))
         self._set("result_detail", "\n".join(
-            ["%s -> Ultra Slot %d." % (meta["type_name"], slot + 1)] + lines + detail))
+            [self.tr("%s -> Ultra Slot %d.") % (meta["type_name"], slot + 1)] + lines + detail))
         return {"status": "ok"}
 
     def _write_mf1(self, do, data, meta, slot):
@@ -697,34 +702,34 @@ class UltraWriterPlugin(object):
             chunk = data[start * BLOCK_SIZE:(start + count) * BLOCK_SIZE]
             pct = 16 + int(58 * written / blocks)
             do(CMD_MF1_WRITE_EMU_BLOCK_DATA, bytes([start]) + chunk,
-               "4000 write blocks %d-%d" % (start, start + count - 1), pct)
+               self.tr("4000 write blocks %d-%d") % (start, start + count - 1), pct)
             written += count
         # use-block0 off -> UID/SAK/ATQA come from res_coll, set here from block0
         do(CMD_HF14A_SET_ANTI_COLL_DATA, _anticoll_from_block0(data, meta["uidlen"]),
-           "4001 set anti-coll data", 82)
+           self.tr("4001 set anti-coll data"), 82)
         return [], TAG_SENSE_HF
 
     def _write_mfu(self, do, data, meta, slot, extra):
         pages = meta["pages"]
         do(CMD_HF14A_SET_ANTI_COLL_DATA, _anticoll_from_ntag(data),
-           "4001 set anti-coll data", 20)
+           self.tr("4001 set anti-coll data"), 20)
         version = extra.get("version") or bytes.fromhex(NTAG_VERSION[meta["tag_type"]])
-        do(CMD_MF0_NTAG_SET_VERSION_DATA, version, "4024 set version", 24)
+        do(CMD_MF0_NTAG_SET_VERSION_DATA, version, self.tr("4024 set version"), 24)
         signature = extra.get("signature") or b""
         if len(signature) == 32:
-            do(CMD_MF0_NTAG_SET_SIGNATURE_DATA, signature, "4026 set signature", 28)
+            do(CMD_MF0_NTAG_SET_SIGNATURE_DATA, signature, self.tr("4026 set signature"), 28)
         p = 0
         for start in range(0, pages, PAGE_CHUNK):
             count = min(PAGE_CHUNK, pages - start)
             chunk = data[start * PAGE_SIZE:(start + count) * PAGE_SIZE]
             pct = 30 + int(48 * start / pages)
             do(CMD_MF0_NTAG_WRITE_EMU_PAGE_DATA, bytes([start, count]) + chunk,
-               "4022 write pages %d-%d" % (start, start + count - 1), pct)
+               self.tr("4022 write pages %d-%d") % (start, start + count - 1), pct)
             p += count
         return [], TAG_SENSE_HF
 
     def _write_em410x(self, do, data, meta, slot):
-        do(CMD_EM410X_SET_EMU_ID, data, "5000 set EM410x id", 60)
+        do(CMD_EM410X_SET_EMU_ID, data, self.tr("5000 set EM410x id"), 60)
         return [], TAG_SENSE_LF
 
     def _verify(self, do, data, meta, slotsense):
@@ -741,7 +746,7 @@ class UltraWriterPlugin(object):
         for start in range(0, blocks, READ_CHUNK_BLOCKS):
             count = min(READ_CHUNK_BLOCKS, blocks - start)
             readback += do(CMD_MF1_READ_EMU_BLOCK_DATA, bytes([start, count]),
-                           "4008 read blocks %d-%d" % (start, start + count - 1), 96)
+                           self.tr("4008 read blocks %d-%d") % (start, start + count - 1), 96)
         readback = bytes(readback)
         if len(readback) != len(data):
             raise UltraError("4008 returned %d bytes, expected %d" % (
@@ -751,11 +756,11 @@ class UltraWriterPlugin(object):
             raise UltraError("4008 mismatch at block %d byte %d: %02X vs %02X" % (
                 first // BLOCK_SIZE, first % BLOCK_SIZE, data[first], readback[first]))
         expected = _anticoll_from_block0(data, meta["uidlen"])
-        anticoll = do(CMD_HF14A_GET_ANTI_COLL_DATA, b"", "4018 read anti-coll", 98)
+        anticoll = do(CMD_HF14A_GET_ANTI_COLL_DATA, b"", self.tr("4018 read anti-coll"), 98)
         if anticoll != expected:
             raise UltraError("4018 mismatch: %s vs %s" % (
                 anticoll.hex(" ").upper(), expected.hex(" ").upper()))
-        return ["4008: %d B identical." % len(data),
+        return [self.tr("4008: %d B identical.") % len(data),
                 "4018: %s" % anticoll.hex(" ").upper()]
 
     def _verify_mfu(self, do, data, meta):
@@ -764,7 +769,7 @@ class UltraWriterPlugin(object):
         for start in range(0, pages, PAGE_CHUNK):
             count = min(PAGE_CHUNK, pages - start)
             readback += do(CMD_MF0_NTAG_READ_EMU_PAGE_DATA, bytes([start, count]),
-                           "4021 read pages %d-%d" % (start, start + count - 1), 96)
+                           self.tr("4021 read pages %d-%d") % (start, start + count - 1), 96)
         readback = bytes(readback)
         if len(readback) != len(data):
             raise UltraError("4021 returned %d bytes, expected %d" % (
@@ -774,17 +779,17 @@ class UltraWriterPlugin(object):
             raise UltraError("4021 mismatch at page %d: %02X vs %02X" % (
                 first // PAGE_SIZE, data[first], readback[first]))
         expected = _anticoll_from_ntag(data)
-        anticoll = do(CMD_HF14A_GET_ANTI_COLL_DATA, b"", "4018 read anti-coll", 98)
+        anticoll = do(CMD_HF14A_GET_ANTI_COLL_DATA, b"", self.tr("4018 read anti-coll"), 98)
         if anticoll != expected:
             raise UltraError("4018 mismatch: %s vs %s" % (
                 anticoll.hex(" ").upper(), expected.hex(" ").upper()))
-        return ["4021: %d pages identical." % pages,
+        return [self.tr("4021: %d pages identical.") % pages,
                 "4018: %s" % anticoll.hex(" ").upper()]
 
     def _verify_em410x(self, do, data):
-        resp = do(CMD_EM410X_GET_EMU_ID, b"", "5001 read EM410x id", 96)
+        resp = do(CMD_EM410X_GET_EMU_ID, b"", self.tr("5001 read EM410x id"), 96)
         got = resp[2:2 + len(data)]
         if got != data:
             raise UltraError("5001 mismatch: %s vs %s" % (
                 got.hex(" ").upper(), data.hex(" ").upper()))
-        return ["5001: id %s." % data.hex().upper()]
+        return [self.tr("5001: id %s.") % data.hex().upper()]
