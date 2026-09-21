@@ -391,6 +391,26 @@ def _dump_dirs():
     return DUMP_DIRS
 
 
+# Optional card-notes store (shared with the card_notes plugin via
+# lib.card_notes).  Missing/malformed file or an unavailable store simply
+# yields no notes; the writer never depends on it.
+def _load_store():
+    try:
+        from lib import card_notes as store
+    except Exception:
+        return None
+    return store
+
+
+def _note_for(store, family, name):
+    if store is None:
+        return ""
+    uid = store.name_uid(name)
+    if not uid:
+        return ""
+    return store.lookup(family, uid)
+
+
 def _scan_dumps():
     out = []
     for directory in _dump_dirs():
@@ -510,10 +530,16 @@ class TinyWriterPlugin(object):
             return {"status": "error"}
 
         self._dumps = dumps
+        store = _load_store()
         labels = []
         for entry in dumps:
             name = entry["name"]
             short = name if len(name) <= 28 else name[:27] + "~"
+            note = _note_for(store, entry["meta"]["kind"], name)
+            if note:
+                short = "%s  %s" % (note, short)
+                if len(short) > 34:
+                    short = short[:33] + "~"
             labels.append({"label": short, "action": "run:choose_dump"})
         self._set_list_items("select_dump", labels)
 
