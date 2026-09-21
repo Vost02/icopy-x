@@ -1,8 +1,8 @@
 {
     "name": "Ultra Writer",
-    "version": "1.2.0",
+    "version": "1.3.0",
     "author": "Vost02",
-    "description": "Write an iCopy-X dump (MIFARE Classic / NTAG / EM410x) into a Chameleon Ultra slot over USB with readback verification",
+    "description": "Move MIFARE Classic / NTAG / EM410x cards both ways with a Chameleon Ultra: write an iCopy-X dump into a slot, or read a slot back out as a dump",
     "entry_class": "UltraWriterPlugin",
     "permissions": [],
     "order": 45

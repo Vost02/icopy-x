@@ -13,7 +13,10 @@
 # This entire header "Required Notice" must remain in place.
 ##########################################################################
 
-"""Ultra Writer -- write an iCopy-X dump into a Chameleon Ultra slot.
+"""Ultra Writer -- move MIFARE/NTAG/EM410x cards both ways with a Chameleon Ultra.
+
+Write: load an iCopy-X dump into a Chameleon Ultra slot.
+Read:  save a Chameleon Ultra slot back out as an iCopy-X dump.
 
 The Chameleon Ultra is expected on the iCopy-X USB host port (appears as
 ``/dev/ttyACM*`` or ``/dev/ttyUSB*``).  It identifies it with a
@@ -27,6 +30,10 @@ Supported dump families (recognized by the iCopy-X filename convention):
 
 Slots are 0..7 on the wire; the UI shows them as "Slot 1".."Slot 8".
 The slot is left as a standard card (no gen1a/use-block0).
+
+Reading enumerates the slots with ``GET_SLOT_INFO`` (1019) and saves the
+emulator memory through ``lib.card_dump`` (see that module for the file
+layout).
 """
 
 import glob
@@ -46,13 +53,18 @@ CMD_SET_SLOT_TAG_TYPE = 1004
 CMD_SET_SLOT_DATA_DEFAULT = 1005
 CMD_SET_SLOT_ENABLE = 1006
 CMD_SLOT_DATA_CONFIG_SAVE = 1009
+CMD_GET_ACTIVE_SLOT = 1018
+CMD_GET_SLOT_INFO = 1019
+CMD_GET_ENABLED_SLOTS = 1023
 CMD_MF1_WRITE_EMU_BLOCK_DATA = 4000
 CMD_HF14A_SET_ANTI_COLL_DATA = 4001
 CMD_MF1_READ_EMU_BLOCK_DATA = 4008
 CMD_HF14A_GET_ANTI_COLL_DATA = 4018
 CMD_MF0_NTAG_READ_EMU_PAGE_DATA = 4021
 CMD_MF0_NTAG_WRITE_EMU_PAGE_DATA = 4022
+CMD_MF0_NTAG_GET_VERSION_DATA = 4023
 CMD_MF0_NTAG_SET_VERSION_DATA = 4024
+CMD_MF0_NTAG_GET_SIGNATURE_DATA = 4025
 CMD_MF0_NTAG_SET_SIGNATURE_DATA = 4026
 CMD_MF0_NTAG_GET_PAGE_COUNT = 4030
 CMD_EM410X_SET_EMU_ID = 5000
@@ -65,13 +77,18 @@ CMD_NAMES = {
     1005: "SET_SLOT_DATA_DEFAULT",
     1006: "SET_SLOT_ENABLE",
     1009: "SLOT_DATA_CONFIG_SAVE",
+    1018: "GET_ACTIVE_SLOT",
+    1019: "GET_SLOT_INFO",
+    1023: "GET_ENABLED_SLOTS",
     4000: "MF1_WRITE_EMU_BLOCK_DATA",
     4001: "HF14A_SET_ANTI_COLL_DATA",
     4008: "MF1_READ_EMU_BLOCK_DATA",
     4018: "HF14A_GET_ANTI_COLL_DATA",
     4021: "MF0_NTAG_READ_EMU_PAGE_DATA",
     4022: "MF0_NTAG_WRITE_EMU_PAGE_DATA",
+    4023: "MF0_NTAG_GET_VERSION_DATA",
     4024: "MF0_NTAG_SET_VERSION_DATA",
+    4025: "MF0_NTAG_GET_SIGNATURE_DATA",
     4026: "MF0_NTAG_SET_SIGNATURE_DATA",
     4030: "MF0_NTAG_GET_PAGE_COUNT",
     5000: "EM410X_SET_EMU_ID",
@@ -136,6 +153,22 @@ MFU_NAME_RE = re.compile(
 
 EM410X_NAME_RE = re.compile(
     r"^EM410x-ID_([0-9A-Fa-f]+)_\d+$", re.IGNORECASE)
+
+# Read-side maps: tag_specific_type_t (1019 GET_SLOT_INFO) -> capability.
+# Only the families the built-in dump/write path understands are listed;
+# everything else (HID, UL-C, EV1, SEOS, ...) is skipped by the reader.
+MFC_READ_BLOCKS = {
+    1000: ("Mini", 20),
+    1001: ("1K", 64),
+    1002: ("Plus-2K", 128),
+    1003: ("4K", 256),
+}
+NTAG_READ = {
+    1100: ("NTAG213", 45),
+    1101: ("NTAG215", 135),
+    1102: ("NTAG216", 231),
+}
+TAG_TYPE_EM410X_LF = 100
 
 BAUD = 115200
 CMD_TIMEOUT = 2.0
@@ -350,6 +383,17 @@ def _note_for(store, family, name):
     return store.lookup(family, uid)
 
 
+# Shared dump writer (lib.card_dump), used by the read-to-dump flow.
+# Imported lazily (like the notes store) so a missing module only
+# disables reading, never the write path.
+def _load_card_dump():
+    try:
+        from lib import card_dump
+    except Exception:
+        return None
+    return card_dump
+
+
 # ---------------------------------------------------------------------------
 # Dump detection / parsing (by iCopy-X filename convention)
 # ---------------------------------------------------------------------------
@@ -483,6 +527,24 @@ def _anticoll_from_ntag(data):
     return bytes([7]) + uid + bytes([0x44, 0x00]) + bytes([0x00, 0x00])
 
 
+def _split_anticoll(anti, data):
+    """(uid_len, uid_bytes, atqa_hex, sak_hex) from a 4018 response.
+
+    4018 payload is ``uidlen|uid|atqa[2]|sak|atslen|ats``.  Falls back to
+    block 0 (4-byte UID) when the slot has no anti-coll data stored.
+    """
+    if len(anti) >= 1:
+        uid_len = anti[0]
+        if uid_len in (4, 7) and len(anti) >= 1 + uid_len:
+            uid = anti[1:1 + uid_len]
+            atqa = anti[1 + uid_len:3 + uid_len]
+            sak = anti[3 + uid_len:4 + uid_len]
+            return (uid_len, bytes(uid),
+                    atqa.hex().upper() if len(atqa) == 2 else None,
+                    sak.hex().upper() if sak else None)
+    return (4, bytes(data[:4]), None, None)
+
+
 def _scan_dumps():
     out = []
     seen = set()
@@ -526,6 +588,9 @@ class UltraWriterPlugin(object):
         self._dumps = []
         self._entry = None
         self._slot = 0
+        self._read_slots = []
+        self._read_entry = None
+        self._active_slot = 0
 
     # -- host helpers --------------------------------------------------
 
@@ -650,6 +715,223 @@ class UltraWriterPlugin(object):
         self._slot = idx
         self._set("slot_text", self.tr("Slot %d") % (idx + 1))
         return {"status": "ready"}
+
+    # -- read: Chameleon slot -> iCopy-X dump --------------------------
+
+    def start_read(self):
+        """List the readable slots of the connected Ultra."""
+        self._set("error_msg", "")
+        self._set("progress_value", 0)
+        self._set("progress_message", "")
+        self._read_slots = []
+
+        if _load_card_dump() is None:
+            self._set("error_msg", self.tr("Dump writer unavailable."))
+            return {"status": "error"}
+
+        self._close()
+        try:
+            ultra, port, version = _find_ultra()
+        except Exception as exc:
+            self._set("error_msg", self.tr("Chameleon Ultra not found.\n\n%s") % exc)
+            return {"status": "error"}
+
+        try:
+            slots = self._scan_read_slots(ultra)
+        except Exception as exc:
+            self._close()
+            self._set("error_msg", self.tr("Cannot read slots:\n%s") % exc)
+            return {"status": "error"}
+
+        if not slots:
+            self._close()
+            self._set(
+                "error_msg",
+                self.tr(
+                    "No readable slot found.\n\nOnly MIFARE Classic, "
+                    "NTAG213/215/216 and EM410x slots can be saved as dumps."))
+            return {"status": "error"}
+
+        self._ultra = ultra
+        self._port = port
+        self._version = version
+        self._read_slots = slots
+        labels = [{"label": s["label"], "action": "run:choose_read_slot"}
+                  for s in slots]
+        self._set_list_items("read_slot", labels)
+        return {"status": "ready"}
+
+    def _scan_read_slots(self, ultra):
+        info = ultra.send(CMD_GET_SLOT_INFO, b"", timeout=CMD_TIMEOUT,
+                          step="1019 slot info")
+        try:
+            enabled = ultra.send(CMD_GET_ENABLED_SLOTS, b"",
+                                 timeout=CMD_TIMEOUT, step="1023 enabled slots")
+        except Exception:
+            enabled = b""
+        slots = []
+        for i in range(min(8, len(info) // 4)):
+            hf, lf = struct.unpack_from(">HH", info, i * 4)
+            entry = self._classify_slot(i, hf, lf)
+            if entry is None:
+                continue
+            if len(enabled) >= (i + 1) * 2:
+                entry["enabled"] = bool(enabled[i * 2] or enabled[i * 2 + 1])
+            slots.append(entry)
+        return slots
+
+    def _classify_slot(self, index, hf, lf):
+        base = self.tr("Slot %d") % (index + 1)
+        if hf in MFC_READ_BLOCKS:
+            name, blocks = MFC_READ_BLOCKS[hf]
+            return {"index": index, "family": "mf1", "tag_type": hf,
+                    "name": name, "blocks": blocks,
+                    "label": "%s  %s" % (base, name)}
+        if hf in NTAG_READ:
+            name, pages = NTAG_READ[hf]
+            return {"index": index, "family": "mfu", "tag_type": hf,
+                    "name": name, "pages": pages,
+                    "label": "%s  %s" % (base, name)}
+        if lf == TAG_TYPE_EM410X_LF:
+            return {"index": index, "family": "em410x", "tag_type": lf,
+                    "name": "EM410x", "label": "%s  EM410x" % base}
+        return None
+
+    def choose_read_slot(self):
+        idx = self._selected_index("read_slot")
+        if idx < 0 or idx >= len(self._read_slots):
+            self._set("error_msg", self.tr("Slot selection out of range"))
+            return {"status": "error"}
+        entry = self._read_slots[idx]
+        self._read_entry = entry
+        self._set("read_slot_text", self.tr("Slot %d") % (entry["index"] + 1))
+        self._set("read_type", entry["name"])
+        return {"status": "ready"}
+
+    def do_read(self):
+        try:
+            return self._do_read()
+        except UltraCommandError as exc:
+            self._set("result_title", self.tr("Read Failed"))
+            self._set("result_detail", str(exc))
+            return {"status": "fail"}
+        except Exception as exc:
+            self._set("result_title", self.tr("Read Failed"))
+            self._set("result_detail", "%s: %s" % (type(exc).__name__, exc))
+            return {"status": "fail"}
+
+    def _do_read(self):
+        card_dump = _load_card_dump()
+        if card_dump is None:
+            raise UltraError("dump writer unavailable")
+
+        entry = self._read_entry
+        slot = entry["index"]
+
+        ultra = self._ultra
+        if ultra is None:
+            self._progress(2, self.tr("Connecting"))
+            ultra, port, version = _find_ultra()
+            self._ultra = ultra
+            self._port = port
+
+        def do(cmd, payload, label, pct):
+            self._progress(pct, label)
+            return ultra.send(cmd, payload, timeout=CMD_TIMEOUT, step=label)
+
+        do(CMD_SET_ACTIVE_SLOT, bytes([slot]), self.tr("1003 set active slot"), 4)
+        self._active_slot = slot
+
+        family = entry["family"]
+        if family == "mf1":
+            path, uid, detail = self._read_mf1(do, entry, card_dump)
+        elif family == "mfu":
+            path, uid, detail = self._read_mfu(do, entry, card_dump)
+        else:
+            path, uid, detail = self._read_em410x(do, entry, card_dump)
+
+        self._progress(100, self.tr("Done"))
+        self._set("result_title", self.tr("Saved"))
+        self._set("result_detail", "\n".join([
+            self.tr("%s -> dump") % entry["name"],
+            os.path.basename(path),
+            detail,
+        ]))
+        return {"status": "ok"}
+
+    def _read_mf1(self, do, entry, card_dump):
+        blocks = entry["blocks"]
+        data = bytearray()
+        for start in range(0, blocks, READ_CHUNK_BLOCKS):
+            count = min(READ_CHUNK_BLOCKS, blocks - start)
+            data += do(CMD_MF1_READ_EMU_BLOCK_DATA, bytes([start, count]),
+                       self.tr("4008 read blocks %d-%d") % (
+                           start, start + count - 1),
+                       6 + int(80 * start / blocks))
+        data = bytes(data)
+        anti = do(CMD_HF14A_GET_ANTI_COLL_DATA, b"",
+                  self.tr("4018 read anti-coll"), 90)
+        uid_len, uid, atqa, sak = _split_anticoll(anti, data)
+        uid = uid.hex().upper()
+        path = card_dump.save_mf1(self._save_dir("mf1"), blocks, uid_len, uid,
+                                  data, atqa=atqa, sak=sak)
+        return path, uid, self.tr("UID %s, %dB, %d blocks") % (
+            uid, uid_len, blocks)
+
+    def _read_mfu(self, do, entry, card_dump):
+        cap = entry["pages"]
+        pages = cap
+        try:
+            resp = do(CMD_MF0_NTAG_GET_PAGE_COUNT, b"",
+                      self.tr("4030 page count"), 6)
+            avail = resp[0] if resp else 0
+            if avail:
+                pages = min(cap, avail)
+        except UltraError:
+            pages = cap
+
+        buf = bytearray()
+        for start in range(0, pages, PAGE_CHUNK):
+            count = min(PAGE_CHUNK, pages - start)
+            buf += do(CMD_MF0_NTAG_READ_EMU_PAGE_DATA, bytes([start, count]),
+                      self.tr("4021 read pages %d-%d") % (
+                          start, start + count - 1),
+                      10 + int(70 * start / pages))
+        page_data = bytes(buf)
+
+        version = signature = None
+        try:
+            version = do(CMD_MF0_NTAG_GET_VERSION_DATA, b"",
+                         self.tr("4023 get version"), 88)
+        except UltraError:
+            version = None
+        try:
+            signature = do(CMD_MF0_NTAG_GET_SIGNATURE_DATA, b"",
+                           self.tr("4025 get signature"), 92)
+        except UltraError:
+            signature = None
+
+        uid = card_dump.mfu_uid(page_data).hex().upper()
+        path = card_dump.save_mfu(self._save_dir("mfu"), entry["name"], uid,
+                                  page_data, version=version,
+                                  signature=signature)
+        return path, uid, self.tr("UID %s, %d pages") % (uid, pages)
+
+    def _read_em410x(self, do, entry, card_dump):
+        resp = do(CMD_EM410X_GET_EMU_ID, b"", self.tr("5001 read EM410x id"), 60)
+        id_bytes = resp[2:7]
+        if len(id_bytes) != 5:
+            raise UltraError("5001 returned %d bytes, expected 5" % len(id_bytes))
+        uid = id_bytes.hex().upper()
+        path = card_dump.save_em410x(self._save_dir("em410x"), uid)
+        return path, uid, self.tr("ID %s") % uid
+
+    def _save_dir(self, family):
+        override = os.environ.get("ULTRA_WRITER_DUMP_DIR")
+        if override:
+            return override
+        card_dump = _load_card_dump()
+        return card_dump.default_dir(family)
 
     def do_write(self):
         try:

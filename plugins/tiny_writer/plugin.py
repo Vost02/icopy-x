@@ -1,4 +1,7 @@
-"""Tiny Writer -- write an iCopy-X dump into a ChameleonMini / Tiny slot.
+"""Tiny Writer -- move MIFARE/NTAG cards both ways with a ChameleonMini / Tiny.
+
+Write: load an iCopy-X dump into a ChameleonMini/Tiny slot.
+Read:  save a ChameleonMini/Tiny slot back out as an iCopy-X dump.
 
 The ChameleonMini / Tiny (proxgrind firmware, 2023 CI build or later) is
 expected on the iCopy-X USB host port and appears as a USB CDC serial device.
@@ -58,6 +61,22 @@ MFU_NAME_RE = re.compile(
 # SAKMODE is only accepted by the firmware for the 4-byte 1K/4K configs;
 # the _7B variants reply 201:INVALID COMMAND USAGE.
 SAKMODE_CONFIGS = ("MF_CLASSIC_1K", "MF_CLASSIC_4K")
+
+# Read-side CONFIG name -> (filename size token, blocks, uid_len).
+MFC_READ = {
+    "MF_CLASSIC_1K": ("1K", 64, 4),
+    "MF_CLASSIC_1K_7B": ("1K", 64, 7),
+    "MF_CLASSIC_4K": ("4K", 256, 4),
+    "MF_CLASSIC_4K_7B": ("4K", 256, 7),
+    "MF_CLASSIC_MINI_4B": ("Mini", 20, 4),
+}
+
+# Default NTAG version bytes -- the AVR emulator does not report them.
+NTAG_DEFAULT_VERSION = {
+    "NTAG213": "0004040201000F03",
+    "NTAG215": "0004040201001103",
+    "NTAG216": "0004040201001303",
+}
 
 DUMP_DIRS = (
     "/mnt/upan/dump/mf1",
@@ -411,6 +430,33 @@ def _note_for(store, family, name):
     return store.lookup(family, uid)
 
 
+# Shared dump writer (lib.card_dump), used by the read-to-dump flow.
+# Imported lazily (like the notes store) so a missing module only
+# disables reading, never the write path.
+def _load_card_dump():
+    try:
+        from lib import card_dump
+    except Exception:
+        return None
+    return card_dump
+
+
+def _uid_used(uid):
+    """True when a slot's UID hint looks like real content.
+
+    The ChameleonMini reports its default config (MF_CLASSIC_1K) for every
+    never-written slot and answers ``UID?`` with the blank/erased value --
+    all ``0`` or all ``F``.  Such slots are skipped so only slots holding a
+    real card are listed.
+    """
+    text = (uid or '').strip().upper()
+    if not text:
+        return False
+    if text.strip('0') == '' or text.strip('F') == '':
+        return False
+    return True
+
+
 def _scan_dumps():
     out = []
     for directory in _dump_dirs():
@@ -460,6 +506,8 @@ class TinyWriterPlugin(object):
         self._dumps = []
         self._entry = None
         self._slot = 1
+        self._read_slots = []
+        self._read_entry = None
 
     # -- host helpers --------------------------------------------------
 
@@ -582,6 +630,208 @@ class TinyWriterPlugin(object):
         self._slot = idx + 1
         self._set("slot_text", self.tr("Slot %d") % (idx + 1))
         return {"status": "ready"}
+
+    # -- read: Chameleon slot -> iCopy-X dump --------------------------
+
+    def start_read(self):
+        """List the readable slots of the connected ChameleonMini/Tiny."""
+        self._set("error_msg", "")
+        self._set("progress_value", 0)
+        self._set("progress_message", "")
+        self._read_slots = []
+
+        if _load_card_dump() is None:
+            self._set("error_msg", self.tr("Dump writer unavailable."))
+            return {"status": "error"}
+
+        self._close()
+        try:
+            tiny, port, version = _find_tiny()
+        except Exception as exc:
+            self._set("error_msg", self.tr(
+                "Chameleon Mini/Tiny not found.\n\n%s") % exc)
+            return {"status": "error"}
+
+        original = self._query_setting(tiny)
+        try:
+            slots = self._scan_read_slots(tiny)
+        except Exception as exc:
+            self._close()
+            self._set("error_msg", self.tr("Cannot read slots:\n%s") % exc)
+            return {"status": "error"}
+        finally:
+            if original is not None:
+                try:
+                    tiny.expect_ok("SETTING=%d" % original)
+                except Exception:
+                    pass
+
+        if not slots:
+            self._close()
+            self._set(
+                "error_msg",
+                self.tr(
+                    "No readable slot found.\n\nOnly MIFARE Classic and "
+                    "NTAG213/215/216 slots can be saved as dumps."))
+            return {"status": "error"}
+
+        self._tiny = tiny
+        self._port = port
+        self._version = version
+        self._read_slots = slots
+        labels = [{"label": s["label"], "action": "run:choose_read_slot"}
+                  for s in slots]
+        self._set_list_items("read_slot", labels)
+        return {"status": "ready"}
+
+    def _query_setting(self, tiny):
+        try:
+            value = tiny.value("SETTING?")
+            return int((value or "").strip())
+        except Exception:
+            return None
+
+    def _scan_read_slots(self, tiny):
+        slots = []
+        for n in range(1, 9):
+            try:
+                tiny.expect_ok("SETTING=%d" % n, step="select slot")
+                _code, msg, extra = tiny.command("CONFIG?")
+            except Exception:
+                continue
+            cfg = (extra or msg or "").strip().upper()
+            entry = self._classify_read_slot(n, cfg)
+            if entry is None:
+                continue
+            # ChameleonMini reports its default config (MF_CLASSIC_1K) for
+            # every never-written slot, so the type alone cannot tell an
+            # empty slot from a real card.  An unwritten slot has an
+            # all-zero UID; skip those so only slots with content list.
+            uid = self._read_uid_hint(tiny)
+            if not _uid_used(uid):
+                continue
+            entry["uid"] = uid
+            slots.append(entry)
+        return slots
+
+    def _read_uid_hint(self, tiny):
+        try:
+            return (tiny.value("UID?") or "").strip().upper()
+        except Exception:
+            return ""
+
+    def _classify_read_slot(self, slot, cfg):
+        base = self.tr("Slot %d") % slot
+        if cfg in MFC_READ:
+            size, blocks, uid_len = MFC_READ[cfg]
+            return {"slot": slot, "family": "mf1", "config": cfg,
+                    "name": size, "blocks": blocks, "uidlen": uid_len,
+                    "label": "%s  %s" % (base, size)}
+        if cfg in NTAG_CFG:
+            pages, memsize = NTAG_CFG[cfg]
+            return {"slot": slot, "family": "mfu", "config": cfg,
+                    "name": cfg, "pages": pages, "memsize": memsize,
+                    "uidlen": 7, "label": "%s  %s" % (base, cfg)}
+        return None
+
+    def choose_read_slot(self):
+        idx = self._selected_index("read_slot")
+        if idx < 0 or idx >= len(self._read_slots):
+            self._set("error_msg", self.tr("Slot selection out of range"))
+            return {"status": "error"}
+        entry = self._read_slots[idx]
+        self._read_entry = entry
+        self._set("read_slot_text", self.tr("Slot %d") % entry["slot"])
+        self._set("read_type", entry["name"])
+        return {"status": "ready"}
+
+    def do_read(self):
+        try:
+            return self._do_read()
+        except TinyCommandError as exc:
+            self._set("result_title", self.tr("Read Failed"))
+            self._set("result_detail", str(exc))
+            return {"status": "fail"}
+        except Exception as exc:
+            self._set("result_title", self.tr("Read Failed"))
+            self._set("result_detail", "%s: %s" % (type(exc).__name__, exc))
+            return {"status": "fail"}
+
+    def _do_read(self):
+        card_dump = _load_card_dump()
+        if card_dump is None:
+            raise TinyError("dump writer unavailable")
+
+        entry = self._read_entry
+        tiny = self._tiny
+        if tiny is None:
+            self._progress(2, self.tr("Connecting"))
+            tiny, port, version = _find_tiny()
+            self._tiny = tiny
+            self._port = port
+
+        self._progress(6, self.tr("SETTING=%d") % entry["slot"])
+        tiny.expect_ok("SETTING=%d" % entry["slot"], step="select slot")
+
+        self._progress(20, self.tr("Reading slot"))
+        image = tiny.download()
+
+        if entry["family"] == "mf1":
+            path, uid, detail = self._read_mf1(entry, image, card_dump)
+        else:
+            path, uid, detail = self._read_mfu(entry, image, card_dump)
+
+        self._progress(100, self.tr("Done"))
+        self._set("result_title", self.tr("Saved"))
+        self._set("result_detail", "\n".join([
+            self.tr("%s -> dump") % entry["name"],
+            os.path.basename(path),
+            detail,
+        ]))
+        return {"status": "ok"}
+
+    def _read_mf1(self, entry, image, card_dump):
+        blocks = entry["blocks"]
+        uid_len = entry["uidlen"]
+        data = image[:blocks * BLOCK_SIZE]
+        if len(data) != blocks * BLOCK_SIZE:
+            raise TinyError("slot returned %d bytes, expected %d" % (
+                len(image), blocks * BLOCK_SIZE))
+        uid = self._mf1_uid(entry, data, uid_len)
+        path = card_dump.save_mf1(self._save_dir("mf1"), blocks, uid_len, uid,
+                                  data)
+        return path, uid, self.tr("UID %s, %dB, %d blocks") % (
+            uid, uid_len, blocks)
+
+    def _read_mfu(self, entry, image, card_dump):
+        pages = entry["pages"]
+        memsize = entry["memsize"]
+        data = image[:memsize]
+        if len(data) != memsize:
+            raise TinyError("slot returned %d bytes, expected %d" % (
+                len(image), memsize))
+        uid = card_dump.mfu_uid(data).hex().upper()
+        version = bytes.fromhex(NTAG_DEFAULT_VERSION[entry["config"]])
+        path = card_dump.save_mfu(self._save_dir("mfu"), entry["name"], uid,
+                                  data, version=version)
+        return path, uid, self.tr("UID %s, %d pages") % (uid, pages)
+
+    def _mf1_uid(self, entry, data, uid_len):
+        hint = (entry.get("uid") or "").upper()
+        if len(hint) == uid_len * 2:
+            return hint
+        if uid_len == 7 and len(data) >= 8:
+            return (data[0:3] + data[4:8]).hex().upper()
+        return data[:uid_len].hex().upper()
+
+    def _save_dir(self, family):
+        override = os.environ.get("TINY_WRITER_DUMP_DIR")
+        if not override:
+            override = os.environ.get("ULTRA_WRITER_DUMP_DIR")
+        if override:
+            return override
+        card_dump = _load_card_dump()
+        return card_dump.default_dir(family)
 
     def do_write(self):
         try:
