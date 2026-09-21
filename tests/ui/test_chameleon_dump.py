@@ -1,25 +1,28 @@
-"""Writer plugins: read a Chameleon slot back out as an iCopy-X dump."""
+"""Chameleon Dump plugin: auto-detect backend, read a slot out as a dump."""
 
 import importlib.util
 import json
 import os
 import struct
 
-import pytest
-
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
-def _load_plugin(folder, module_name):
-    path = os.path.join(REPO, 'plugins', folder, 'plugin.py')
-    spec = importlib.util.spec_from_file_location(module_name, path)
+def _load_dispatcher():
+    path = os.path.join(REPO, 'plugins', 'chameleon_dump', 'plugin.py')
+    spec = importlib.util.spec_from_file_location('chameleon_dump_test', path)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     return mod
 
 
-ux = _load_plugin('ultra_writer', 'ultra_writer_read_test')
-tx = _load_plugin('tiny_writer', 'tiny_writer_read_test')
+cd = _load_dispatcher()
+ux = cd._ultra
+tx = cd._tiny
+
+
+def _no_device(*a, **k):
+    raise RuntimeError('no device')
 
 
 class FakeHost(object):
@@ -122,9 +125,11 @@ def _ultra(monkeypatch, tmp_path, slots):
     ultra = FakeUltra(slots)
     monkeypatch.setattr(ux, '_find_ultra',
                         lambda *a, **k: (ultra, 'MOCK', (2, 2)))
+    monkeypatch.setattr(tx, '_find_tiny', _no_device)
     monkeypatch.setenv('ULTRA_WRITER_DUMP_DIR', str(tmp_path))
+    monkeypatch.setenv('TINY_WRITER_DUMP_DIR', str(tmp_path))
     host = FakeHost()
-    return ux.UltraWriterPlugin(host), host, ultra
+    return cd.ChameleonDumpPlugin(host), host, ultra
 
 
 def test_ultra_read_mfc_4b(monkeypatch, tmp_path):
@@ -148,8 +153,7 @@ def test_ultra_read_mfc_4b(monkeypatch, tmp_path):
 
 def test_ultra_read_mfc_7b_uses_anticoll_uid(monkeypatch, tmp_path):
     slot = _mfc_slot('AABBCCDDEEFF00', 1003, 256)
-    slots = [slot] + [{} for _ in range(7)]
-    plugin, host, _ = _ultra(monkeypatch, tmp_path, slots)
+    plugin, host, _ = _ultra(monkeypatch, tmp_path, [slot] + [{}] * 7)
     plugin.start_read()
     host._list_state['read_slot'] = {'selected': 0}
     plugin.choose_read_slot()
@@ -196,9 +200,10 @@ def test_ultra_read_skips_unsupported_and_empty(monkeypatch, tmp_path):
 
 
 def test_ultra_read_no_slots_is_error(monkeypatch, tmp_path):
-    plugin, host, _ = _ultra(monkeypatch, tmp_path, [{} for _ in range(8)])
+    plugin, host, ultra = _ultra(monkeypatch, tmp_path, [{} for _ in range(8)])
     assert plugin.start_read()['status'] == 'error'
     assert 'No readable slot' in host.vars['error_msg']
+    assert ultra.closed  # detection-opened port must not leak
 
 
 # ======================================================================
@@ -209,6 +214,7 @@ class FakeTiny(object):
     def __init__(self, slots):
         self.slots = slots          # {1..8: {'config':..., 'mem': bytes}}
         self.active = 1
+        self.closed = False
 
     def expect_ok(self, text, step='', timeout=None):
         if text.startswith('SETTING='):
@@ -234,16 +240,18 @@ class FakeTiny(object):
         return bytes(self.slots[self.active]['mem'])
 
     def close(self):
-        pass
+        self.closed = True
 
 
 def _tiny(monkeypatch, tmp_path, slots):
     tiny = FakeTiny(slots)
+    monkeypatch.setattr(ux, '_find_ultra', _no_device)
     monkeypatch.setattr(tx, '_find_tiny',
                         lambda *a, **k: (tiny, 'MOCK', 'mock'))
+    monkeypatch.setenv('ULTRA_WRITER_DUMP_DIR', str(tmp_path))
     monkeypatch.setenv('TINY_WRITER_DUMP_DIR', str(tmp_path))
     host = FakeHost()
-    return tx.TinyWriterPlugin(host), host
+    return cd.ChameleonDumpPlugin(host), host, tiny
 
 
 def _tiny_slots():
@@ -263,22 +271,21 @@ def _tiny_slots():
 
 
 def test_tiny_read_lists_supported_slots(monkeypatch, tmp_path):
-    plugin, host = _tiny(monkeypatch, tmp_path, _tiny_slots())
+    plugin, host, _ = _tiny(monkeypatch, tmp_path, _tiny_slots())
     assert plugin.start_read()['status'] == 'ready'
     assert _items(host) == ['Slot 1  1K', 'Slot 8  NTAG213']
 
 
 def test_tiny_read_skips_unwritten_default_slot(monkeypatch, tmp_path):
-    # Every slot reports the firmware default config but has a zero UID.
     slots = {n: {'config': 'MF_CLASSIC_1K', 'mem': bytes(1024)}
              for n in range(1, 9)}
-    plugin, host = _tiny(monkeypatch, tmp_path, slots)
+    plugin, host, tiny = _tiny(monkeypatch, tmp_path, slots)
     assert plugin.start_read()['status'] == 'error'
     assert 'No readable slot' in host.vars['error_msg']
 
 
 def test_tiny_read_mfc(monkeypatch, tmp_path):
-    plugin, host = _tiny(monkeypatch, tmp_path, _tiny_slots())
+    plugin, host, _ = _tiny(monkeypatch, tmp_path, _tiny_slots())
     plugin.start_read()
     host._list_state['read_slot'] = {'selected': 0}
     plugin.choose_read_slot()
@@ -288,7 +295,7 @@ def test_tiny_read_mfc(monkeypatch, tmp_path):
 
 
 def test_tiny_read_ntag(monkeypatch, tmp_path):
-    plugin, host = _tiny(monkeypatch, tmp_path, _tiny_slots())
+    plugin, host, _ = _tiny(monkeypatch, tmp_path, _tiny_slots())
     plugin.start_read()
     host._list_state['read_slot'] = {'selected': 1}
     plugin.choose_read_slot()
@@ -302,6 +309,37 @@ def test_tiny_read_ntag(monkeypatch, tmp_path):
 
 def test_tiny_read_no_slots_is_error(monkeypatch, tmp_path):
     slots = {n: {'config': 'NONE', 'mem': b''} for n in range(1, 9)}
-    plugin, host = _tiny(monkeypatch, tmp_path, slots)
+    plugin, host, tiny = _tiny(monkeypatch, tmp_path, slots)
     assert plugin.start_read()['status'] == 'error'
     assert 'No readable slot' in host.vars['error_msg']
+    assert tiny.closed  # detection-opened port must not leak
+
+
+# ======================================================================
+# Detection
+# ======================================================================
+
+def test_no_device_reports_error(monkeypatch, tmp_path):
+    monkeypatch.setattr(ux, '_find_ultra', _no_device)
+    monkeypatch.setattr(tx, '_find_tiny', _no_device)
+    host = FakeHost()
+    plugin = cd.ChameleonDumpPlugin(host)
+    assert plugin.start_read()['status'] == 'error'
+    assert 'No Chameleon' in host.vars['error_msg']
+
+
+# ======================================================================
+# ui.json — Back must never re-enter a scanning state
+# ======================================================================
+
+def _ui_states():
+    path = os.path.join(REPO, 'plugins', 'chameleon_dump', 'ui.json')
+    with open(path, encoding='utf-8') as fh:
+        return json.load(fh)['states']
+
+
+def test_back_returns_to_menu_without_rescan():
+    states = _ui_states()
+    assert states['select_dump']['screen']['keys']['M1'] == 'set_state:menu'
+    assert states['select_slot']['screen']['keys']['M1'] == 'set_state:select_dump'
+    assert states['read_slot']['screen']['keys']['M1'] == 'set_state:menu'

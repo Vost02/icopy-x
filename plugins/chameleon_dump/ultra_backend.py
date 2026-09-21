@@ -577,8 +577,8 @@ def _scan_dumps():
 # Plugin
 # ---------------------------------------------------------------------------
 
-class UltraWriterPlugin(object):
-    """Entry class for the Ultra Writer plugin."""
+class UltraBackend(object):
+    """Chameleon Ultra backend for the Chameleon Dump plugin."""
 
     def __init__(self, host=None):
         self.host = host
@@ -640,10 +640,16 @@ class UltraWriterPlugin(object):
 
     # -- UI methods ----------------------------------------------------
 
-    def start(self):
+    def start(self, device=None):
+        self._close()
         self._set("error_msg", "")
         self._set("progress_value", 0)
         self._set("progress_message", "")
+
+        # Take ownership of an already-found device first, so every early
+        # error return stays closable (on_destroy -> _close).
+        if device is not None:
+            self._ultra, self._port, self._version = device
 
         try:
             dumps = _scan_dumps()
@@ -674,16 +680,14 @@ class UltraWriterPlugin(object):
             labels.append({"label": short, "action": "run:choose_dump"})
         self._set_list_items("select_dump", labels)
 
-        self._close()
-        try:
-            ultra, port, version = _find_ultra()
-        except Exception as exc:
-            self._set("error_msg", self.tr("Chameleon Ultra not found.\n\n%s") % exc)
-            return {"status": "error"}
+        if device is None:
+            try:
+                self._ultra, self._port, self._version = _find_ultra()
+            except Exception as exc:
+                self._set("error_msg",
+                          self.tr("Chameleon Ultra not found.\n\n%s") % exc)
+                return {"status": "error"}
 
-        self._ultra = ultra
-        self._port = port
-        self._version = version
         return {"status": "ready"}
 
     def choose_dump(self):
@@ -718,33 +722,38 @@ class UltraWriterPlugin(object):
 
     # -- read: Chameleon slot -> iCopy-X dump --------------------------
 
-    def start_read(self):
+    def start_read(self, device=None):
         """List the readable slots of the connected Ultra."""
+        self._close()
         self._set("error_msg", "")
         self._set("progress_value", 0)
         self._set("progress_message", "")
         self._read_slots = []
 
+        # Take ownership of an already-found device first, so every early
+        # error return stays closable (on_destroy -> _close).
+        if device is not None:
+            self._ultra, self._port, self._version = device
+
         if _load_card_dump() is None:
             self._set("error_msg", self.tr("Dump writer unavailable."))
             return {"status": "error"}
 
-        self._close()
-        try:
-            ultra, port, version = _find_ultra()
-        except Exception as exc:
-            self._set("error_msg", self.tr("Chameleon Ultra not found.\n\n%s") % exc)
-            return {"status": "error"}
+        if device is None:
+            try:
+                self._ultra, self._port, self._version = _find_ultra()
+            except Exception as exc:
+                self._set("error_msg",
+                          self.tr("Chameleon Ultra not found.\n\n%s") % exc)
+                return {"status": "error"}
 
         try:
-            slots = self._scan_read_slots(ultra)
+            slots = self._scan_read_slots(self._ultra)
         except Exception as exc:
-            self._close()
             self._set("error_msg", self.tr("Cannot read slots:\n%s") % exc)
             return {"status": "error"}
 
         if not slots:
-            self._close()
             self._set(
                 "error_msg",
                 self.tr(
@@ -752,9 +761,6 @@ class UltraWriterPlugin(object):
                     "NTAG213/215/216 and EM410x slots can be saved as dumps."))
             return {"status": "error"}
 
-        self._ultra = ultra
-        self._port = port
-        self._version = version
         self._read_slots = slots
         labels = [{"label": s["label"], "action": "run:choose_read_slot"}
                   for s in slots]

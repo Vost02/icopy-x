@@ -1,9 +1,0 @@
-{
-    "name": "Tiny Writer",
-    "version": "1.2.0",
-    "author": "Vost02",
-    "description": "Move MIFARE Classic / NTAG cards both ways with a ChameleonMini / Tiny (proxgrind firmware): write an iCopy-X dump into a slot, or read a slot back out as a dump",
-    "entry_class": "TinyWriterPlugin",
-    "permissions": [],
-    "order": 46
-}

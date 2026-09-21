@@ -495,8 +495,8 @@ def _scan_dumps():
 # Plugin
 # ---------------------------------------------------------------------------
 
-class TinyWriterPlugin(object):
-    """Entry class for the Tiny Writer plugin."""
+class TinyBackend(object):
+    """ChameleonMini / Tiny backend for the Chameleon Dump plugin."""
 
     def __init__(self, host=None):
         self.host = host
@@ -557,10 +557,16 @@ class TinyWriterPlugin(object):
 
     # -- UI methods ----------------------------------------------------
 
-    def start(self):
+    def start(self, device=None):
+        self._close()
         self._set("error_msg", "")
         self._set("progress_value", 0)
         self._set("progress_message", "")
+
+        # Take ownership of an already-found device first, so every early
+        # error return stays closable (on_destroy -> _close).
+        if device is not None:
+            self._tiny, self._port, self._version = device
 
         try:
             dumps = _scan_dumps()
@@ -591,16 +597,14 @@ class TinyWriterPlugin(object):
             labels.append({"label": short, "action": "run:choose_dump"})
         self._set_list_items("select_dump", labels)
 
-        self._close()
-        try:
-            tiny, port, version = _find_tiny()
-        except Exception as exc:
-            self._set("error_msg", self.tr("Chameleon Mini/Tiny not found.\n\n%s") % exc)
-            return {"status": "error"}
+        if device is None:
+            try:
+                self._tiny, self._port, self._version = _find_tiny()
+            except Exception as exc:
+                self._set("error_msg", self.tr(
+                    "Chameleon Mini/Tiny not found.\n\n%s") % exc)
+                return {"status": "error"}
 
-        self._tiny = tiny
-        self._port = port
-        self._version = version
         return {"status": "ready"}
 
     def choose_dump(self):
@@ -633,41 +637,45 @@ class TinyWriterPlugin(object):
 
     # -- read: Chameleon slot -> iCopy-X dump --------------------------
 
-    def start_read(self):
+    def start_read(self, device=None):
         """List the readable slots of the connected ChameleonMini/Tiny."""
+        self._close()
         self._set("error_msg", "")
         self._set("progress_value", 0)
         self._set("progress_message", "")
         self._read_slots = []
 
+        # Take ownership of an already-found device first, so every early
+        # error return stays closable (on_destroy -> _close).
+        if device is not None:
+            self._tiny, self._port, self._version = device
+
         if _load_card_dump() is None:
             self._set("error_msg", self.tr("Dump writer unavailable."))
             return {"status": "error"}
 
-        self._close()
-        try:
-            tiny, port, version = _find_tiny()
-        except Exception as exc:
-            self._set("error_msg", self.tr(
-                "Chameleon Mini/Tiny not found.\n\n%s") % exc)
-            return {"status": "error"}
+        if device is None:
+            try:
+                self._tiny, self._port, self._version = _find_tiny()
+            except Exception as exc:
+                self._set("error_msg", self.tr(
+                    "Chameleon Mini/Tiny not found.\n\n%s") % exc)
+                return {"status": "error"}
 
-        original = self._query_setting(tiny)
+        original = self._query_setting(self._tiny)
         try:
-            slots = self._scan_read_slots(tiny)
+            slots = self._scan_read_slots(self._tiny)
         except Exception as exc:
-            self._close()
             self._set("error_msg", self.tr("Cannot read slots:\n%s") % exc)
             return {"status": "error"}
         finally:
             if original is not None:
                 try:
-                    tiny.expect_ok("SETTING=%d" % original)
+                    self._tiny.expect_ok("SETTING=%d" % original)
                 except Exception:
                     pass
 
         if not slots:
-            self._close()
             self._set(
                 "error_msg",
                 self.tr(
@@ -675,9 +683,6 @@ class TinyWriterPlugin(object):
                     "NTAG213/215/216 slots can be saved as dumps."))
             return {"status": "error"}
 
-        self._tiny = tiny
-        self._port = port
-        self._version = version
         self._read_slots = slots
         labels = [{"label": s["label"], "action": "run:choose_read_slot"}
                   for s in slots]

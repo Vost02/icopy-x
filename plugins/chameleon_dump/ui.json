@@ -1,18 +1,18 @@
 {
     "plugin": true,
-    "name": "Ultra Writer",
-    "version": "1.3.0",
+    "name": "Chameleon Dump",
+    "version": "1.0.0",
     "initial_state": "menu",
     "states": {
         "menu": {
             "screen": {
-                "title": "Ultra Writer",
+                "title": "Chameleon Dump",
                 "content": {
                     "type": "list",
                     "style": "plain",
                     "page_size": 4,
                     "items": [
-                        {"label": "Write to Ultra", "action": "set_state:home"},
+                        {"label": "Write to Chameleon", "action": "set_state:home"},
                         {"label": "Read to Dump", "action": "set_state:read_home"}
                     ]
                 },
@@ -29,12 +29,13 @@
         "home": {
             "on_enter": "run:start",
             "screen": {
-                "title": "Ultra Writer",
+                "title": "Chameleon Dump",
                 "content": {
                     "type": "text",
                     "lines": [
-                        {"text": "Connect the", "size": "normal"},
-                        {"text": "Chameleon Ultra", "size": "normal"},
+                        {"text": "Connect a", "size": "normal"},
+                        {"text": "Chameleon", "size": "normal"},
+                        {"text": "(Ultra / Tiny)", "size": "normal"},
                         {"text": "to the iCopy-X", "size": "normal"},
                         {"text": "USB port.", "size": "normal"},
                         {"text": ""},
@@ -69,7 +70,7 @@
                     "M2": "select",
                     "UP": "scroll:-1",
                     "DOWN": "scroll:1",
-                    "M1": "set_state:home"
+                    "M1": "set_state:menu"
                 }
             },
             "transitions": {
@@ -80,7 +81,7 @@
         },
         "select_slot": {
             "screen": {
-                "title": "Ultra Slot",
+                "title": "Slot",
                 "content": {
                     "type": "list",
                     "style": "plain",
@@ -197,8 +198,9 @@
                 "content": {
                     "type": "text",
                     "lines": [
-                        {"text": "Connect the", "size": "normal"},
-                        {"text": "Chameleon Ultra", "size": "normal"},
+                        {"text": "Connect a", "size": "normal"},
+                        {"text": "Chameleon", "size": "normal"},
+                        {"text": "(Ultra / Tiny)", "size": "normal"},
                         {"text": "to the iCopy-X", "size": "normal"},
                         {"text": "USB port.", "size": "normal"},
                         {"text": ""},
@@ -323,7 +325,7 @@
         },
         "error": {
             "screen": {
-                "title": "Ultra Writer",
+                "title": "Chameleon Dump",
                 "content": {
                     "type": "text",
                     "lines": [
